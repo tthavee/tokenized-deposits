@@ -7,6 +7,8 @@ The POC demonstrates how traditional bank deposits can be represented as ERC-20 
 blockchain. Clients go through a KYC check, receive a blockchain wallet, and can deposit or withdraw
 funds — with the corresponding tokens being minted or burned on-chain. Off-chain state is persisted in
 Google Firestore. The system is exposed via a Python backend API and a Flutter mobile/web frontend.
+The primary deployment target is a local Hardhat network for development and POC demonstration.
+Sepolia testnet is supported as an optional network for stakeholder access.
 
 ---
 
@@ -110,7 +112,7 @@ Google Firestore. The system is exposed via a Python backend API and a Flutter m
 2. WHEN a Bank_Operator triggers a pause, THE Smart_Contract SHALL halt all minting and burning operations until unpaused.
 3. WHILE the Smart_Contract is paused, THE Backend_API SHALL reject deposit and withdrawal requests and return a descriptive error to the Frontend.
 4. THE Smart_Contract SHALL follow the ERC-20 standard so that token balances are queryable by standard Ethereum tooling.
-5. THE Smart_Contract SHALL be deployable to a local Hardhat network for POC demonstration purposes.
+5. THE Smart_Contract SHALL be deployable to a local Hardhat network for POC demonstration purposes. Deployment to the Ethereum Sepolia testnet is supported as an optional configuration.
 
 ---
 
@@ -124,3 +126,16 @@ Google Firestore. The system is exposed via a Python backend API and a Flutter m
 2. THE Backend_API SHALL store each Client record in Firestore with fields for: client identifier, KYC status, Wallet address, and creation timestamp.
 3. IF a Firestore write fails after an on-chain event, THEN THE Backend_API SHALL retry the write up to 3 times before logging a permanent failure.
 4. THE Backend_API SHALL expose a reconciliation endpoint that compares on-chain token balances with Firestore records and returns any discrepancies.
+
+---
+
+### Requirement 8: Optional Testnet Deployment (Sepolia)
+
+**User Story:** As a Bank_Operator, I want the option to deploy the smart contract to Sepolia testnet, so that stakeholders can inspect and interact with the contract publicly if needed.
+
+#### Acceptance Criteria
+
+1. THE deployment script SHALL support both local Hardhat and Sepolia networks via a network flag.
+2. WHEN deploying to Sepolia, THE Backend_API SHALL connect via an RPC provider (Alchemy or Infura) configured via environment variable.
+3. WHEN deploying to Sepolia, THE Smart_Contract SHOULD be verified on Sepolia Etherscan so that the source code is publicly readable.
+4. Sepolia deployment is OPTIONAL and not required for the core POC demonstration.
