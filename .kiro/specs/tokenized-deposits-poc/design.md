@@ -129,27 +129,53 @@ sequenceDiagram
 
     rect rgb(240, 255, 240)
         Note over Client,EL: Deposit (Mint)
-        Client->>FE: Enter amount, asset_type, network
-        FE->>API: POST /clients/{id}/deposit { amount, asset_type, network }
-        API->>TR: lookup contract_address for (asset_type, network)
-        TR-->>API: contract_address
-        API->>FS: write transactions/{tx_id} (status=pending)
-        API->>HH: eth_sendTransaction → mint(chain_address, amount)
-        HH->>SC: mint(chain_address, amount)
-        SC->>SC: require isApproved(chain_address)
-        SC->>SC: require !paused
-        SC-->>HH: emit Mint(chain_address, amount) + tx receipt
-        HH-->>API: tx hash
-        API->>FS: update transactions/{tx_id} (status=confirmed, tx_hash)
-        API-->>FE: 200 { tx_hash }
-        FE-->>Client: Deposit confirmed
 
-        Note over EL,FS: Async – Event Listener Worker
-        EL->>HH: eth_getLogs (poll every 2–5 s)
-        HH-->>EL: [Mint event log]
-        EL->>TR: reverse-lookup (contract_address → asset_type, network)
-        EL->>FS: upsert transactions/{on_chain_tx_hash} (idempotent)
-        EL->>FS: update system/event_listener (last_processed_block)
+        rect rgb(200, 240, 200)
+            Note over Client,API: 1. Client Request
+            Client->>FE: Enter amount, asset_type, network
+            FE->>API: POST /clients/{id}/deposit { amount, asset_type, network }
+        end
+
+        rect rgb(200, 240, 200)
+            Note over API,TR: 2. Registry Lookup
+            API->>TR: lookup contract_address for (asset_type, network)
+            TR-->>API: contract_address
+        end
+
+        rect rgb(200, 240, 200)
+            Note over API,FS: 3. Create Pending Record
+            API->>FS: write transactions/{tx_id} (status=pending)
+        end
+
+        rect rgb(200, 240, 200)
+            Note over API,SC: 4. On-Chain Mint
+            API->>HH: eth_sendTransaction → mint(chain_address, amount)
+            HH->>SC: mint(chain_address, amount)
+            SC->>SC: require isApproved(chain_address)
+            SC->>SC: require !paused
+            SC-->>HH: emit Mint(chain_address, amount) + tx receipt
+            HH-->>API: tx hash
+        end
+
+        rect rgb(200, 240, 200)
+            Note over API,FS: 5. Confirm Record
+            API->>FS: update transactions/{tx_id} (status=confirmed, tx_hash)
+        end
+
+        rect rgb(200, 240, 200)
+            Note over API,Client: 6. Response
+            API-->>FE: 200 { tx_hash }
+            FE-->>Client: Deposit confirmed
+        end
+
+        rect rgb(170, 220, 170)
+            Note over EL,FS: 7. Async – Event Listener Worker
+            EL->>HH: eth_getLogs (poll every 2–5 s)
+            HH-->>EL: [Mint event log]
+            EL->>TR: reverse-lookup (contract_address → asset_type, network)
+            EL->>FS: upsert transactions/{on_chain_tx_hash} (idempotent)
+            EL->>FS: update system/event_listener (last_processed_block)
+        end
     end
 ```
 
@@ -168,30 +194,60 @@ sequenceDiagram
 
     rect rgb(255, 248, 240)
         Note over Client,EL: Withdrawal (Burn)
-        Client->>FE: Enter amount, asset_type, network
-        FE->>API: POST /clients/{id}/withdraw { amount, asset_type, network }
-        API->>TR: lookup contract_address for (asset_type, network)
-        TR-->>API: contract_address
-        API->>HH: eth_call → balanceOf(chain_address)
-        HH-->>API: current_balance
-        API->>API: require current_balance >= amount
-        API->>FS: write transactions/{tx_id} (status=pending)
-        API->>HH: eth_sendTransaction → burn(chain_address, amount)
-        HH->>SC: burn(chain_address, amount)
-        SC->>SC: require isApproved(chain_address)
-        SC->>SC: require !paused
-        SC-->>HH: emit Burn(chain_address, amount) + tx receipt
-        HH-->>API: tx hash
-        API->>FS: update transactions/{tx_id} (status=confirmed, tx_hash)
-        API-->>FE: 200 { tx_hash }
-        FE-->>Client: Withdrawal confirmed
 
-        Note over EL,FS: Async – Event Listener Worker
-        EL->>HH: eth_getLogs (poll every 2–5 s)
-        HH-->>EL: [Burn event log]
-        EL->>TR: reverse-lookup (contract_address → asset_type, network)
-        EL->>FS: upsert transactions/{on_chain_tx_hash} (idempotent)
-        EL->>FS: update system/event_listener (last_processed_block)
+        rect rgb(255, 220, 195)
+            Note over Client,API: 1. Client Request
+            Client->>FE: Enter amount, asset_type, network
+            FE->>API: POST /clients/{id}/withdraw { amount, asset_type, network }
+        end
+
+        rect rgb(255, 220, 195)
+            Note over API,TR: 2. Registry Lookup
+            API->>TR: lookup contract_address for (asset_type, network)
+            TR-->>API: contract_address
+        end
+
+        rect rgb(255, 220, 195)
+            Note over API,HH: 3. Balance Check
+            API->>HH: eth_call → balanceOf(chain_address)
+            HH-->>API: current_balance
+            API->>API: require current_balance >= amount
+        end
+
+        rect rgb(255, 220, 195)
+            Note over API,FS: 4. Create Pending Record
+            API->>FS: write transactions/{tx_id} (status=pending)
+        end
+
+        rect rgb(255, 220, 195)
+            Note over API,SC: 5. On-Chain Burn
+            API->>HH: eth_sendTransaction → burn(chain_address, amount)
+            HH->>SC: burn(chain_address, amount)
+            SC->>SC: require isApproved(chain_address)
+            SC->>SC: require !paused
+            SC-->>HH: emit Burn(chain_address, amount) + tx receipt
+            HH-->>API: tx hash
+        end
+
+        rect rgb(255, 220, 195)
+            Note over API,FS: 6. Confirm Record
+            API->>FS: update transactions/{tx_id} (status=confirmed, tx_hash)
+        end
+
+        rect rgb(255, 220, 195)
+            Note over API,Client: 7. Response
+            API-->>FE: 200 { tx_hash }
+            FE-->>Client: Withdrawal confirmed
+        end
+
+        rect rgb(235, 195, 165)
+            Note over EL,FS: 8. Async – Event Listener Worker
+            EL->>HH: eth_getLogs (poll every 2–5 s)
+            HH-->>EL: [Burn event log]
+            EL->>TR: reverse-lookup (contract_address → asset_type, network)
+            EL->>FS: upsert transactions/{on_chain_tx_hash} (idempotent)
+            EL->>FS: update system/event_listener (last_processed_block)
+        end
     end
 ```
 
