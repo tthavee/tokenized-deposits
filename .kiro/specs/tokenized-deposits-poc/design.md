@@ -255,66 +255,69 @@ sequenceDiagram
 
 ## Activity Diagram
 
-The following diagram captures the decision logic for the two core flows — **Deposit** and **Withdrawal** — from the Backend API's perspective, including all guard checks and error paths.
+The following diagrams capture the decision logic for the two core flows — **Deposit** and **Withdrawal** — from the Backend API's perspective, including all guard checks and error paths. The Event Listener Worker loop is shown separately.
+
+### Deposit Flow
 
 ```mermaid
 flowchart TD
-    %% ── Deposit Flow ───────────────────────────────────────────────────
-    subgraph DEPOSIT["Deposit Flow (POST /clients/{id}/deposit)"]
-        D1([Receive deposit request]) --> D2{Client exists\n& KYC approved?}
-        D2 -- No --> D_ERR1[Return 403 Forbidden]
-        D2 -- Yes --> D3{asset_type + network\nin Token_Registry?}
-        D3 -- No --> D_ERR2[Return 404\nasset_type/network not found]
-        D3 -- Yes --> D4{Contract paused\nfor this pair?}
-        D4 -- Yes --> D_ERR3[Return 503\nContract paused]
-        D4 -- No --> D5{amount > 0?}
-        D5 -- No --> D_ERR4[Return 422\nInvalid amount]
-        D5 -- Yes --> D6[Write Firestore tx\nstatus = pending]
-        D6 --> D7[Send mint tx\nto Hardhat node]
-        D7 --> D8{Tx confirmed\non-chain?}
-        D8 -- No / Revert --> D9[Update Firestore tx\nstatus = failed]
-        D9 --> D_ERR5[Return 502\nOn-chain error]
-        D8 -- Yes --> D10[Update Firestore tx\nstatus = confirmed\ntx_hash = hash]
-        D10 --> D11([Return 200 tx_hash])
-    end
+    D1([Receive deposit request]) --> D2{Client exists\n& KYC approved?}
+    D2 -- No --> D_ERR1[Return 403 Forbidden]
+    D2 -- Yes --> D3{asset_type + network\nin Token_Registry?}
+    D3 -- No --> D_ERR2[Return 404\nasset_type/network not found]
+    D3 -- Yes --> D4{Contract paused\nfor this pair?}
+    D4 -- Yes --> D_ERR3[Return 503\nContract paused]
+    D4 -- No --> D5{amount > 0?}
+    D5 -- No --> D_ERR4[Return 422\nInvalid amount]
+    D5 -- Yes --> D6[Write Firestore tx\nstatus = pending]
+    D6 --> D7[Send mint tx\nto Hardhat node]
+    D7 --> D8{Tx confirmed\non-chain?}
+    D8 -- No / Revert --> D9[Update Firestore tx\nstatus = failed]
+    D9 --> D_ERR5[Return 502\nOn-chain error]
+    D8 -- Yes --> D10[Update Firestore tx\nstatus = confirmed\ntx_hash = hash]
+    D10 --> D11([Return 200 tx_hash])
+```
 
-    %% ── Withdrawal Flow ────────────────────────────────────────────────
-    subgraph WITHDRAW["Withdrawal Flow (POST /clients/{id}/withdraw)"]
-        W1([Receive withdrawal request]) --> W2{Client exists\n& KYC approved?}
-        W2 -- No --> W_ERR1[Return 403 Forbidden]
-        W2 -- Yes --> W3{asset_type + network\nin Token_Registry?}
-        W3 -- No --> W_ERR2[Return 404\nasset_type/network not found]
-        W3 -- Yes --> W4{Contract paused\nfor this pair?}
-        W4 -- Yes --> W_ERR3[Return 503\nContract paused]
-        W4 -- No --> W5[Query on-chain\nbalanceOf chain_address]
-        W5 --> W6{balance >= amount?}
-        W6 -- No --> W_ERR4[Return 422\nInsufficient balance]
-        W6 -- Yes --> W7[Write Firestore tx\nstatus = pending]
-        W7 --> W8[Send burn tx\nto Hardhat node]
-        W8 --> W9{Tx confirmed\non-chain?}
-        W9 -- No / Revert --> W10[Update Firestore tx\nstatus = failed]
-        W10 --> W_ERR5[Return 502\nOn-chain error]
-        W9 -- Yes --> W11[Update Firestore tx\nstatus = confirmed\ntx_hash = hash]
-        W11 --> W12([Return 200 tx_hash])
-    end
+### Withdrawal Flow
 
-    %% ── Event Listener Worker ──────────────────────────────────────────
-    subgraph EL_FLOW["Event Listener Worker (background asyncio task)"]
-        EL1([Start / Restart]) --> EL2[Read last_processed_block\nfrom Firestore]
-        EL2 --> EL3[Poll eth_getLogs\nfrom last_block+1 to latest]
-        EL3 --> EL4{New events\nfound?}
-        EL4 -- No --> EL5[Wait 2–5 s]
-        EL5 --> EL3
-        EL4 -- Yes --> EL6[Reverse-lookup\nasset_type + network\nfrom contract address]
-        EL6 --> EL7[Upsert Firestore tx record\nkeyed on on_chain_tx_hash]
-        EL7 --> EL8{Firestore write\nsucceeded?}
-        EL8 -- No, retry < 3 --> EL9[Exponential backoff\nretry]
-        EL9 --> EL7
-        EL8 -- No, retry = 3 --> EL10[Log permanent failure\ndo NOT advance cursor]
-        EL10 --> EL5
-        EL8 -- Yes --> EL11[Update last_processed_block\nin Firestore]
-        EL11 --> EL5
-    end
+```mermaid
+flowchart TD
+    W1([Receive withdrawal request]) --> W2{Client exists\n& KYC approved?}
+    W2 -- No --> W_ERR1[Return 403 Forbidden]
+    W2 -- Yes --> W3{asset_type + network\nin Token_Registry?}
+    W3 -- No --> W_ERR2[Return 404\nasset_type/network not found]
+    W3 -- Yes --> W4{Contract paused\nfor this pair?}
+    W4 -- Yes --> W_ERR3[Return 503\nContract paused]
+    W4 -- No --> W5[Query on-chain\nbalanceOf chain_address]
+    W5 --> W6{balance >= amount?}
+    W6 -- No --> W_ERR4[Return 422\nInsufficient balance]
+    W6 -- Yes --> W7[Write Firestore tx\nstatus = pending]
+    W7 --> W8[Send burn tx\nto Hardhat node]
+    W8 --> W9{Tx confirmed\non-chain?}
+    W9 -- No / Revert --> W10[Update Firestore tx\nstatus = failed]
+    W10 --> W_ERR5[Return 502\nOn-chain error]
+    W9 -- Yes --> W11[Update Firestore tx\nstatus = confirmed\ntx_hash = hash]
+    W11 --> W12([Return 200 tx_hash])
+```
+
+### Event Listener Worker
+
+```mermaid
+flowchart TD
+    EL1([Start / Restart]) --> EL2[Read last_processed_block\nfrom Firestore]
+    EL2 --> EL3[Poll eth_getLogs\nfrom last_block+1 to latest]
+    EL3 --> EL4{New events\nfound?}
+    EL4 -- No --> EL5[Wait 2–5 s]
+    EL5 --> EL3
+    EL4 -- Yes --> EL6[Reverse-lookup\nasset_type + network\nfrom contract address]
+    EL6 --> EL7[Upsert Firestore tx record\nkeyed on on_chain_tx_hash]
+    EL7 --> EL8{Firestore write\nsucceeded?}
+    EL8 -- No, retry < 3 --> EL9[Exponential backoff\nretry]
+    EL9 --> EL7
+    EL8 -- No, retry = 3 --> EL10[Log permanent failure\ndo NOT advance cursor]
+    EL10 --> EL5
+    EL8 -- Yes --> EL11[Update last_processed_block\nin Firestore]
+    EL11 --> EL5
 ```
 
 ---
