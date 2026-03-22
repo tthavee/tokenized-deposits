@@ -331,6 +331,15 @@ Key design decisions:
 - All minting and burning is gated by an on-chain KYC allowlist maintained by each contract's owner. Wallet registration must be performed on every contract in the `Token_Registry` for the relevant `Network`.
 - Admin pause/unpause is per-contract (per `(Asset_Type, Network)` pair). Pausing `USD/hardhat` does not affect `EUR/hardhat` or `USD/sepolia`.
 - The Event Listener Worker monitors all contracts listed in the `Token_Registry` and resolves `(Asset_Type, Network)` for each event by reverse-looking up the emitting contract address in the registry. Each Firestore record is tagged with both `asset_type` and `network`.
+- **Hardhat state persistence:** The local Hardhat node runs entirely in memory by default — all deployed contracts and token balances are lost on restart. To preserve chain state across restarts, the node is started with `--save-state` and resumed with `--load-state`:
+  ```bash
+  # First run — start node and save state on exit
+  npx hardhat node --save-state .hardhat-state.json
+
+  # Subsequent runs — resume from saved state
+  npx hardhat node --load-state .hardhat-state.json --save-state .hardhat-state.json
+  ```
+  `.hardhat-state.json` is added to `.gitignore`. If no state file exists (e.g., first run or intentional reset), the node starts from a blank chain and contracts must be redeployed. The `Token_Registry` in Firestore must always match the deployed contract addresses — if the chain is reset, the `token_registry` collection must be reseeded to match the new deployment.
 
 ---
 

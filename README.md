@@ -36,7 +36,14 @@ npm install
 Start a local Hardhat node (port 8545):
 
 ```bash
+# First run — fresh chain, state saved on exit
 npm run node
+
+# Subsequent runs — resume from saved state
+npm run node:resume
+
+# Intentional reset — wipe state and start fresh (requires redeployment)
+npm run node:reset
 ```
 
 Compile contracts:
