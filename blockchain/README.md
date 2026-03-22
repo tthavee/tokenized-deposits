@@ -2,6 +2,23 @@
 
 Local Ethereum development environment for the Tokenized Deposits POC.
 
+## About This Project
+
+T-Bank's Tokenized Deposits POC demonstrates how traditional fiat bank deposits can be represented as ERC-20 tokens (`DepositToken`) on a blockchain. KYC-verified clients receive a chain-agnostic wallet and can deposit or withdraw funds across multiple asset types (e.g., USD, EUR) on one or more networks. A Python backend API orchestrates all business logic, Solidity smart contracts govern on-chain token operations (one per `(Asset_Type, Network)` pair), Google Firestore persists off-chain state, and a Flutter frontend provides the client-facing interface.
+
+Key design decisions:
+- One `DepositToken.sol` contract is deployed per `(Asset_Type, Network)` pair (e.g., `USD/hardhat`, `EUR/hardhat`)
+- The backend API is the sole transaction signer — clients never hold private keys
+- A `Token_Registry` in Firestore maps each `(Asset_Type, Network)` pair to its deployed contract address
+- An Event Listener Worker polls on-chain events and keeps Firestore in sync
+
+### Spec Documents
+
+- [Requirements](../.kiro/specs/tokenized-deposits-poc/requirements.md) — functional requirements, user stories, and acceptance criteria
+- [Design](../.kiro/specs/tokenized-deposits-poc/design.md) — architecture, data models, sequence diagrams, activity diagrams, and correctness properties
+
+---
+
 ## Prerequisites
 
 - Node.js >= 18
