@@ -70,6 +70,199 @@ graph TD
     EL -->|upsert event records + cursor| FS
 ```
 
+---
+
+## Sequence Diagram
+
+The following diagrams show the end-to-end flow for the two primary client operations. Each diagram has its own actor header row for readability.
+
+### KYC & Wallet Creation
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant FE as Flutter Frontend
+    participant API as Python Backend API
+    participant KYC as KYC Service
+    participant FS as Google Firestore
+    participant TR as Token Registry
+    participant HH as Hardhat Node
+    participant SC as DepositToken Contract<br/>(Asset_Type / Network)
+
+    rect rgb(240, 248, 255)
+        Note over Client,SC: KYC & Wallet Creation
+        Client->>FE: Submit KYC form
+        FE->>API: POST /clients
+        API->>KYC: verify(client_id, documents)
+        KYC-->>API: { status: "approved" }
+        API->>FS: write clients/{client_id} (kyc_status=approved)
+        API-->>FE: 201 Created
+
+        Client->>FE: Create wallet
+        FE->>API: POST /clients/{id}/wallet
+        API->>FS: read clients/{client_id} (check kyc_status)
+        API->>API: EthereumWalletService.generate_address(network)
+        API->>FS: update wallet { network → chain_address }
+        API->>TR: lookup all contracts for Network
+        loop For each (Asset_Type, Network) contract
+            API->>HH: eth_sendTransaction → registerWallet(chain_address)
+            HH->>SC: registerWallet(chain_address)
+            SC-->>HH: tx receipt
+            HH-->>API: tx hash
+        end
+        API-->>FE: 200 { wallet: { hardhat: "0x..." } }
+    end
+```
+
+### Deposit (Mint)
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant FE as Flutter Frontend
+    participant API as Python Backend API
+    participant FS as Google Firestore
+    participant TR as Token Registry
+    participant HH as Hardhat Node
+    participant SC as DepositToken Contract<br/>(Asset_Type / Network)
+    participant EL as Event Listener Worker
+
+    rect rgb(240, 255, 240)
+        Note over Client,EL: Deposit (Mint)
+        Client->>FE: Enter amount, asset_type, network
+        FE->>API: POST /clients/{id}/deposit { amount, asset_type, network }
+        API->>TR: lookup contract_address for (asset_type, network)
+        TR-->>API: contract_address
+        API->>FS: write transactions/{tx_id} (status=pending)
+        API->>HH: eth_sendTransaction → mint(chain_address, amount)
+        HH->>SC: mint(chain_address, amount)
+        SC->>SC: require isApproved(chain_address)
+        SC->>SC: require !paused
+        SC-->>HH: emit Mint(chain_address, amount) + tx receipt
+        HH-->>API: tx hash
+        API->>FS: update transactions/{tx_id} (status=confirmed, tx_hash)
+        API-->>FE: 200 { tx_hash }
+        FE-->>Client: Deposit confirmed
+
+        Note over EL,FS: Async – Event Listener Worker
+        EL->>HH: eth_getLogs (poll every 2–5 s)
+        HH-->>EL: [Mint event log]
+        EL->>TR: reverse-lookup (contract_address → asset_type, network)
+        EL->>FS: upsert transactions/{on_chain_tx_hash} (idempotent)
+        EL->>FS: update system/event_listener (last_processed_block)
+    end
+```
+
+### Withdrawal (Burn)
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant FE as Flutter Frontend
+    participant API as Python Backend API
+    participant FS as Google Firestore
+    participant TR as Token Registry
+    participant HH as Hardhat Node
+    participant SC as DepositToken Contract<br/>(Asset_Type / Network)
+    participant EL as Event Listener Worker
+
+    rect rgb(255, 248, 240)
+        Note over Client,EL: Withdrawal (Burn)
+        Client->>FE: Enter amount, asset_type, network
+        FE->>API: POST /clients/{id}/withdraw { amount, asset_type, network }
+        API->>TR: lookup contract_address for (asset_type, network)
+        TR-->>API: contract_address
+        API->>HH: eth_call → balanceOf(chain_address)
+        HH-->>API: current_balance
+        API->>API: require current_balance >= amount
+        API->>FS: write transactions/{tx_id} (status=pending)
+        API->>HH: eth_sendTransaction → burn(chain_address, amount)
+        HH->>SC: burn(chain_address, amount)
+        SC->>SC: require isApproved(chain_address)
+        SC->>SC: require !paused
+        SC-->>HH: emit Burn(chain_address, amount) + tx receipt
+        HH-->>API: tx hash
+        API->>FS: update transactions/{tx_id} (status=confirmed, tx_hash)
+        API-->>FE: 200 { tx_hash }
+        FE-->>Client: Withdrawal confirmed
+
+        Note over EL,FS: Async – Event Listener Worker
+        EL->>HH: eth_getLogs (poll every 2–5 s)
+        HH-->>EL: [Burn event log]
+        EL->>TR: reverse-lookup (contract_address → asset_type, network)
+        EL->>FS: upsert transactions/{on_chain_tx_hash} (idempotent)
+        EL->>FS: update system/event_listener (last_processed_block)
+    end
+```
+
+---
+
+## Activity Diagram
+
+The following diagram captures the decision logic for the two core flows — **Deposit** and **Withdrawal** — from the Backend API's perspective, including all guard checks and error paths.
+
+```mermaid
+flowchart TD
+    %% ── Deposit Flow ───────────────────────────────────────────────────
+    subgraph DEPOSIT["Deposit Flow (POST /clients/{id}/deposit)"]
+        D1([Receive deposit request]) --> D2{Client exists\n& KYC approved?}
+        D2 -- No --> D_ERR1[Return 403 Forbidden]
+        D2 -- Yes --> D3{asset_type + network\nin Token_Registry?}
+        D3 -- No --> D_ERR2[Return 404\nasset_type/network not found]
+        D3 -- Yes --> D4{Contract paused\nfor this pair?}
+        D4 -- Yes --> D_ERR3[Return 503\nContract paused]
+        D4 -- No --> D5{amount > 0?}
+        D5 -- No --> D_ERR4[Return 422\nInvalid amount]
+        D5 -- Yes --> D6[Write Firestore tx\nstatus = pending]
+        D6 --> D7[Send mint tx\nto Hardhat node]
+        D7 --> D8{Tx confirmed\non-chain?}
+        D8 -- No / Revert --> D9[Update Firestore tx\nstatus = failed]
+        D9 --> D_ERR5[Return 502\nOn-chain error]
+        D8 -- Yes --> D10[Update Firestore tx\nstatus = confirmed\ntx_hash = hash]
+        D10 --> D11([Return 200 tx_hash])
+    end
+
+    %% ── Withdrawal Flow ────────────────────────────────────────────────
+    subgraph WITHDRAW["Withdrawal Flow (POST /clients/{id}/withdraw)"]
+        W1([Receive withdrawal request]) --> W2{Client exists\n& KYC approved?}
+        W2 -- No --> W_ERR1[Return 403 Forbidden]
+        W2 -- Yes --> W3{asset_type + network\nin Token_Registry?}
+        W3 -- No --> W_ERR2[Return 404\nasset_type/network not found]
+        W3 -- Yes --> W4{Contract paused\nfor this pair?}
+        W4 -- Yes --> W_ERR3[Return 503\nContract paused]
+        W4 -- No --> W5[Query on-chain\nbalanceOf chain_address]
+        W5 --> W6{balance >= amount?}
+        W6 -- No --> W_ERR4[Return 422\nInsufficient balance]
+        W6 -- Yes --> W7[Write Firestore tx\nstatus = pending]
+        W7 --> W8[Send burn tx\nto Hardhat node]
+        W8 --> W9{Tx confirmed\non-chain?}
+        W9 -- No / Revert --> W10[Update Firestore tx\nstatus = failed]
+        W10 --> W_ERR5[Return 502\nOn-chain error]
+        W9 -- Yes --> W11[Update Firestore tx\nstatus = confirmed\ntx_hash = hash]
+        W11 --> W12([Return 200 tx_hash])
+    end
+
+    %% ── Event Listener Worker ──────────────────────────────────────────
+    subgraph EL_FLOW["Event Listener Worker (background asyncio task)"]
+        EL1([Start / Restart]) --> EL2[Read last_processed_block\nfrom Firestore]
+        EL2 --> EL3[Poll eth_getLogs\nfrom last_block+1 to latest]
+        EL3 --> EL4{New events\nfound?}
+        EL4 -- No --> EL5[Wait 2–5 s]
+        EL5 --> EL3
+        EL4 -- Yes --> EL6[Reverse-lookup\nasset_type + network\nfrom contract address]
+        EL6 --> EL7[Upsert Firestore tx record\nkeyed on on_chain_tx_hash]
+        EL7 --> EL8{Firestore write\nsucceeded?}
+        EL8 -- No, retry < 3 --> EL9[Exponential backoff\nretry]
+        EL9 --> EL7
+        EL8 -- No, retry = 3 --> EL10[Log permanent failure\ndo NOT advance cursor]
+        EL10 --> EL5
+        EL8 -- Yes --> EL11[Update last_processed_block\nin Firestore]
+        EL11 --> EL5
+    end
+```
+
+---
+
 Key design decisions:
 - The Backend_API is the sole signer of on-chain transactions (operator key). Clients never hold private keys in the POC. This is a conscious simplification consistent with how real tokenized deposit systems operate. In production, a KMS (e.g., AWS KMS, HashiCorp Vault) would replace the local operator key.
 - The `Wallet` is a logical construct identified by `client_id`. It stores a `Network → Chain_Address` map in Firestore. A `WalletService` interface abstracts address generation; `EthereumWalletService` is the only implementation, generating EOA addresses for Ethereum-based Networks (`"hardhat"`, `"sepolia"`).
