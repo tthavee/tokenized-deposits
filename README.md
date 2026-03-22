@@ -14,8 +14,8 @@ Key design decisions:
 
 ### Spec Documents
 
-- [Requirements](../.kiro/specs/tokenized-deposits-poc/requirements.md) — functional requirements, user stories, and acceptance criteria
-- [Design](../.kiro/specs/tokenized-deposits-poc/design.md) — architecture, data models, sequence diagrams, activity diagrams, and correctness properties
+- [Requirements](.kiro/specs/tokenized-deposits-poc/requirements.md) — functional requirements, user stories, and acceptance criteria
+- [Design](.kiro/specs/tokenized-deposits-poc/design.md) — architecture, data models, sequence diagrams, activity diagrams, and correctness properties
 
 ---
 
