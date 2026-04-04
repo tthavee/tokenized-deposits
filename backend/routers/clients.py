@@ -1,9 +1,13 @@
 """
 Client endpoints:
 
-  POST /clients                — KYC verification + client record creation
-  POST /clients/{id}/wallet   — wallet address generation + on-chain registration
-  POST /clients/{id}/deposit  — mint Deposit_Tokens for a fiat deposit
+  POST /clients                    — KYC verification + client record creation
+  POST /clients/{id}/wallet        — wallet address generation + on-chain registration
+  POST /clients/{id}/deposit       — mint Deposit_Tokens for a fiat deposit
+  POST /clients/{id}/withdraw      — burn Deposit_Tokens for a fiat withdrawal
+  GET  /clients/{id}/balance       — on-chain balance for one (asset_type, network)
+  GET  /clients/{id}/balances      — on-chain balances for all Token_Registry pairs
+  GET  /clients/{id}/transactions  — Firestore transaction history for the client
 """
 
 import os
@@ -11,7 +15,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from web3 import Web3
 
@@ -130,6 +134,24 @@ class WithdrawResponse(BaseModel):
     transaction_id: str
     status: str
     on_chain_tx_hash: Optional[str] = None
+
+
+class BalanceEntry(BaseModel):
+    asset_type: str
+    network: str
+    chain_address: str
+    balance: int
+
+
+class TransactionRecord(BaseModel):
+    id: str
+    type: str
+    amount: int
+    asset_type: str
+    network: str
+    status: str
+    on_chain_tx_hash: Optional[str] = None
+    created_at: str
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +438,117 @@ def create_withdrawal(
         {"status": "confirmed", "on_chain_tx_hash": tx_hash}
     )
     return WithdrawResponse(transaction_id=tx_id, status="confirmed", on_chain_tx_hash=tx_hash)
+
+
+@router.get("/{client_id}/balance", response_model=BalanceEntry)
+def get_balance(
+    client_id: str,
+    asset_type: str = Query(...),
+    network: str = Query(...),
+    db=Depends(_db),
+    token_registry: dict[str, Any] = Depends(_token_registry),
+):
+    """Return the on-chain token balance for one (asset_type, network) pair."""
+    doc = db.collection("clients").document(client_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    client: dict[str, Any] = doc.to_dict()
+    chain_address = client.get("wallet", {}).get(network)
+    if not chain_address:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No wallet address for network {network!r}",
+        )
+
+    registry_key = f"{asset_type}_{network}"
+    entry = token_registry.get(registry_key)
+    if not entry or not entry.get("contract_address"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No contract found for {asset_type}/{network}",
+        )
+
+    w3 = Web3(Web3.HTTPProvider(RPC_URLS.get(network, "")))
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(entry["contract_address"]),
+        abi=_DEPOSIT_TOKEN_ABI,
+    )
+    balance = contract.functions.balanceOf(
+        Web3.to_checksum_address(chain_address)
+    ).call()
+
+    return BalanceEntry(
+        asset_type=asset_type,
+        network=network,
+        chain_address=chain_address,
+        balance=balance,
+    )
+
+
+@router.get("/{client_id}/balances", response_model=list[BalanceEntry])
+def get_balances(
+    client_id: str,
+    db=Depends(_db),
+    token_registry: dict[str, Any] = Depends(_token_registry),
+):
+    """Return on-chain balances for every (asset_type, network) pair in the Token_Registry."""
+    doc = db.collection("clients").document(client_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    wallet: dict[str, str] = doc.to_dict().get("wallet", {})
+    results: list[BalanceEntry] = []
+
+    for entry in token_registry.values():
+        asset_type = entry["asset_type"]
+        network = entry["network"]
+        contract_address = entry.get("contract_address", "")
+        chain_address = wallet.get(network, "")
+
+        if not contract_address or not chain_address:
+            results.append(
+                BalanceEntry(
+                    asset_type=asset_type,
+                    network=network,
+                    chain_address=chain_address,
+                    balance=0,
+                )
+            )
+            continue
+
+        w3 = Web3(Web3.HTTPProvider(RPC_URLS.get(network, "")))
+        contract = w3.eth.contract(
+            address=Web3.to_checksum_address(contract_address),
+            abi=_DEPOSIT_TOKEN_ABI,
+        )
+        balance = contract.functions.balanceOf(
+            Web3.to_checksum_address(chain_address)
+        ).call()
+        results.append(
+            BalanceEntry(
+                asset_type=asset_type,
+                network=network,
+                chain_address=chain_address,
+                balance=balance,
+            )
+        )
+
+    return results
+
+
+@router.get("/{client_id}/transactions", response_model=list[TransactionRecord])
+def get_transactions(
+    client_id: str,
+    db=Depends(_db),
+):
+    """Return all Firestore transaction records for the client."""
+    doc = db.collection("clients").document(client_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    docs = db.collection("transactions").where("client_id", "==", client_id).stream()
+    return [TransactionRecord(**d.to_dict()) for d in docs]
 
 
 # ---------------------------------------------------------------------------
