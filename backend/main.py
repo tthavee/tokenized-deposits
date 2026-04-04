@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from firebase_admin import credentials, firestore
 
+from routers.admin import router as admin_router
 from routers.clients import router as clients_router
 
 load_dotenv()
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Tokenized Deposits API", lifespan=lifespan)
 app.include_router(clients_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")
