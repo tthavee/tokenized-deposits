@@ -2,3 +2,5 @@ node_modules/
 artifacts/
 cache/
 deployment.json
+deployment-*.json
+.hardhat-state.json
