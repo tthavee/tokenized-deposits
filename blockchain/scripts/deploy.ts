@@ -19,10 +19,11 @@ async function main(): Promise<void> {
     (await ethers.provider.getBalance(deployer.address)).toString()
   );
 
-  // Deploy DepositToken
-  // NOTE: DepositToken contract will be implemented in issue #5
+  // Deploy DepositToken for (USD, hardhat) pair — override via env vars for other pairs
+  const assetType = process.env.ASSET_TYPE ?? "USD";
+  const networkLabel = process.env.NETWORK_LABEL ?? network.name;
   const ContractFactory = await ethers.getContractFactory("DepositToken");
-  const contract = await ContractFactory.deploy();
+  const contract = await ContractFactory.deploy(assetType, networkLabel);
   await contract.waitForDeployment();
 
   const contractAddress = await contract.getAddress();
