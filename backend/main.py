@@ -14,12 +14,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from firebase_admin import credentials, firestore
 
-load_dotenv()
+from routers.clients import router as clients_router
 
-# ---------------------------------------------------------------------------
-# In-memory token registry  {asset_type}_{network} -> registry document dict
-# ---------------------------------------------------------------------------
-token_registry: dict[str, dict[str, Any]] = {}
+load_dotenv()
 
 
 def _init_firebase() -> firestore.Client:
@@ -31,11 +28,13 @@ def _init_firebase() -> firestore.Client:
     return firestore.client()
 
 
-def _load_token_registry(db: firestore.Client) -> None:
+def _load_token_registry(db: firestore.Client) -> dict[str, Any]:
+    registry: dict[str, Any] = {}
     docs = db.collection("token_registry").stream()
     for doc in docs:
-        token_registry[doc.id] = doc.to_dict()
-    print(f"[startup] loaded {len(token_registry)} token_registry entries: {list(token_registry.keys())}")
+        registry[doc.id] = doc.to_dict()
+    print(f"[startup] loaded {len(registry)} token_registry entries: {list(registry.keys())}")
+    return registry
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +43,8 @@ def _load_token_registry(db: firestore.Client) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db = _init_firebase()
-    _load_token_registry(db)
+    app.state.db = db
+    app.state.token_registry = _load_token_registry(db)
     yield
 
 
@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Tokenized Deposits API", lifespan=lifespan)
+app.include_router(clients_router)
 
 
 @app.get("/health")
