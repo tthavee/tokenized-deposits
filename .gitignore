@@ -1,0 +1,6 @@
+# Firebase credentials
+backend/secrets/
+
+# Hardhat state
+blockchain/.hardhat-state.json
+blockchain/deployment*.json
