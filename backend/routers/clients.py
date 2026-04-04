@@ -46,6 +46,23 @@ _DEPOSIT_TOKEN_ABI = [
         "type": "function",
     },
     {
+        "inputs": [
+            {"internalType": "address", "name": "from", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+        ],
+        "name": "burn",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
         "inputs": [],
         "name": "paused",
         "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
@@ -98,6 +115,18 @@ class DepositRequest(BaseModel):
 
 
 class DepositResponse(BaseModel):
+    transaction_id: str
+    status: str
+    on_chain_tx_hash: Optional[str] = None
+
+
+class WithdrawRequest(BaseModel):
+    amount: int
+    asset_type: str
+    network: str
+
+
+class WithdrawResponse(BaseModel):
     transaction_id: str
     status: str
     on_chain_tx_hash: Optional[str] = None
@@ -281,6 +310,112 @@ def create_deposit(
         {"status": "confirmed", "on_chain_tx_hash": tx_hash}
     )
     return DepositResponse(transaction_id=tx_id, status="confirmed", on_chain_tx_hash=tx_hash)
+
+
+@router.post("/{client_id}/withdraw", response_model=WithdrawResponse)
+def create_withdrawal(
+    client_id: str,
+    body: WithdrawRequest,
+    db=Depends(_db),
+    token_registry: dict[str, Any] = Depends(_token_registry),
+):
+    """
+    Burn Deposit_Tokens for a fiat withdrawal.
+
+    1. Resolve the DepositToken contract from the Token_Registry.
+    2. Verify the client's chain address holds enough tokens (422 if not).
+    3. Create a pending transaction record in Firestore.
+    4. Call burn() on-chain via the operator key.
+    5. Update the transaction record to confirmed/failed.
+    """
+    # Validate client exists and has a wallet address for the requested network
+    doc = db.collection("clients").document(client_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    client: dict[str, Any] = doc.to_dict()
+    chain_address = client.get("wallet", {}).get(body.network)
+    if not chain_address:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No wallet address for network {body.network!r}",
+        )
+
+    # Resolve contract from token registry
+    registry_key = f"{body.asset_type}_{body.network}"
+    entry = token_registry.get(registry_key)
+    if not entry or not entry.get("contract_address"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No contract found for {body.asset_type}/{body.network}",
+        )
+    contract_address = entry["contract_address"]
+
+    # Connect to chain
+    operator_key = os.environ.get("OPERATOR_PRIVATE_KEY", "")
+    rpc_url = RPC_URLS.get(body.network, "")
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(contract_address),
+        abi=_DEPOSIT_TOKEN_ABI,
+    )
+
+    # Check pause state
+    if contract.functions.paused().call():
+        raise HTTPException(
+            status_code=503,
+            detail=f"contract paused for {body.asset_type}/{body.network}",
+        )
+
+    # Verify sufficient balance
+    balance = contract.functions.balanceOf(
+        Web3.to_checksum_address(chain_address)
+    ).call()
+    if balance < body.amount:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Insufficient token balance", "balance": balance},
+        )
+
+    # Create pending transaction record
+    tx_id = str(uuid.uuid4())
+    db.collection("transactions").document(tx_id).set(
+        {
+            "id": tx_id,
+            "client_id": client_id,
+            "type": "withdrawal",
+            "amount": body.amount,
+            "asset_type": body.asset_type,
+            "network": body.network,
+            "status": "pending",
+            "on_chain_tx_hash": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+    # Burn tokens
+    try:
+        operator = w3.eth.account.from_key(operator_key)
+        tx = contract.functions.burn(
+            Web3.to_checksum_address(chain_address),
+            body.amount,
+        ).build_transaction(
+            {
+                "from": operator.address,
+                "nonce": w3.eth.get_transaction_count(operator.address),
+                "gas": 200_000,
+            }
+        )
+        signed = w3.eth.account.sign_transaction(tx, operator_key)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction).hex()
+    except Exception as exc:
+        db.collection("transactions").document(tx_id).update({"status": "failed"})
+        raise HTTPException(status_code=502, detail=f"On-chain burn failed: {exc}") from exc
+
+    db.collection("transactions").document(tx_id).update(
+        {"status": "confirmed", "on_chain_tx_hash": tx_hash}
+    )
+    return WithdrawResponse(transaction_id=tx_id, status="confirmed", on_chain_tx_hash=tx_hash)
 
 
 # ---------------------------------------------------------------------------
