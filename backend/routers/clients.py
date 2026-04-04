@@ -3,11 +3,12 @@ Client endpoints:
 
   POST /clients                — KYC verification + client record creation
   POST /clients/{id}/wallet   — wallet address generation + on-chain registration
+  POST /clients/{id}/deposit  — mint Deposit_Tokens for a fiat deposit
 """
 
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 _kyc_service = KYCService()
 _wallet_service = EthereumWalletService()
 
-# Minimal ABI — only the function we call
+# Minimal ABI — only the functions we call
 _REGISTER_WALLET_ABI = [
     {
         "inputs": [{"internalType": "address", "name": "wallet", "type": "address"}],
@@ -31,6 +32,26 @@ _REGISTER_WALLET_ABI = [
         "stateMutability": "nonpayable",
         "type": "function",
     }
+]
+
+_DEPOSIT_TOKEN_ABI = [
+    {
+        "inputs": [
+            {"internalType": "address", "name": "to", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+        ],
+        "name": "mint",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "paused",
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
 ]
 
 
@@ -68,6 +89,18 @@ class ClientResponse(BaseModel):
 class WalletResponse(BaseModel):
     client_id: str
     wallet: dict[str, str]
+
+
+class DepositRequest(BaseModel):
+    amount: int
+    asset_type: str
+    network: str
+
+
+class DepositResponse(BaseModel):
+    transaction_id: str
+    status: str
+    on_chain_tx_hash: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +187,100 @@ def create_wallet(
             _register_on_chain(token_registry, network, address, rpc_url, operator_key)
 
     return WalletResponse(client_id=client_id, wallet=wallet)
+
+
+@router.post("/{client_id}/deposit", response_model=DepositResponse)
+def create_deposit(
+    client_id: str,
+    body: DepositRequest,
+    db=Depends(_db),
+    token_registry: dict[str, Any] = Depends(_token_registry),
+):
+    """
+    Mint Deposit_Tokens for a fiat deposit.
+
+    1. Resolve the DepositToken contract from the Token_Registry.
+    2. Create a pending transaction record in Firestore.
+    3. Call mint() on-chain via the operator key.
+    4. Update the transaction record to confirmed/failed.
+    """
+    # Validate client exists and has a wallet address for the requested network
+    doc = db.collection("clients").document(client_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    client: dict[str, Any] = doc.to_dict()
+    chain_address = client.get("wallet", {}).get(body.network)
+    if not chain_address:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No wallet address for network {body.network!r}",
+        )
+
+    # Resolve contract from token registry
+    registry_key = f"{body.asset_type}_{body.network}"
+    entry = token_registry.get(registry_key)
+    if not entry or not entry.get("contract_address"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No contract found for {body.asset_type}/{body.network}",
+        )
+    contract_address = entry["contract_address"]
+
+    # Create pending transaction record
+    tx_id = str(uuid.uuid4())
+    db.collection("transactions").document(tx_id).set(
+        {
+            "id": tx_id,
+            "client_id": client_id,
+            "type": "deposit",
+            "amount": body.amount,
+            "asset_type": body.asset_type,
+            "network": body.network,
+            "status": "pending",
+            "on_chain_tx_hash": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+    # Connect to chain and check pause state
+    operator_key = os.environ.get("OPERATOR_PRIVATE_KEY", "")
+    rpc_url = RPC_URLS.get(body.network, "")
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address(contract_address),
+        abi=_DEPOSIT_TOKEN_ABI,
+    )
+
+    if contract.functions.paused().call():
+        raise HTTPException(
+            status_code=503,
+            detail=f"contract paused for {body.asset_type}/{body.network}",
+        )
+
+    # Mint tokens
+    try:
+        operator = w3.eth.account.from_key(operator_key)
+        tx = contract.functions.mint(
+            Web3.to_checksum_address(chain_address),
+            body.amount,
+        ).build_transaction(
+            {
+                "from": operator.address,
+                "nonce": w3.eth.get_transaction_count(operator.address),
+                "gas": 200_000,
+            }
+        )
+        signed = w3.eth.account.sign_transaction(tx, operator_key)
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction).hex()
+    except Exception as exc:
+        db.collection("transactions").document(tx_id).update({"status": "failed"})
+        raise HTTPException(status_code=502, detail=f"On-chain mint failed: {exc}") from exc
+
+    db.collection("transactions").document(tx_id).update(
+        {"status": "confirmed", "on_chain_tx_hash": tx_hash}
+    )
+    return DepositResponse(transaction_id=tx_id, status="confirmed", on_chain_tx_hash=tx_hash)
 
 
 # ---------------------------------------------------------------------------
