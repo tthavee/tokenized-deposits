@@ -1,6 +1,14 @@
 # Firebase credentials
 backend/secrets/
 
+# Firebase cache and logs
+.firebase/
+firebase-debug.log*
+*.log
+
+# Environment variables
+.env
+
 # Hardhat state
 blockchain/.hardhat-state.json
 blockchain/deployment*.json
