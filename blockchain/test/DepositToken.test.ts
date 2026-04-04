@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { DepositToken } from "../typechain-types";
+import { DepositToken, DepositToken__factory } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import * as fc from "fast-check";
 
@@ -8,7 +8,8 @@ import * as fc from "fast-check";
 // Helpers
 // ---------------------------------------------------------------------------
 async function deploy(assetType: string, networkLabel: string): Promise<DepositToken> {
-  const Factory = await ethers.getContractFactory("DepositToken");
+  const [signer] = await ethers.getSigners();
+  const Factory = new DepositToken__factory(signer);
   const contract = await Factory.deploy(assetType, networkLabel);
   await contract.waitForDeployment();
   return contract;
@@ -221,12 +222,11 @@ describe("DepositToken — unit tests", () => {
 // Property-Based Tests
 // ---------------------------------------------------------------------------
 describe("DepositToken — property-based tests", () => {
-  let owner: HardhatEthersSigner;
   let user: HardhatEthersSigner;
   let nonOwner: HardhatEthersSigner;
 
   before(async () => {
-    [owner, user, nonOwner] = await ethers.getSigners();
+    [, user, nonOwner] = await ethers.getSigners();
   });
 
   const ITERATIONS = 100;

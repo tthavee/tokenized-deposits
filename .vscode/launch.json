@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Hardhat Test (debug)",
+      "program": "${workspaceFolder}/blockchain/node_modules/.bin/hardhat",
+      "args": ["test", "test/DepositToken.test.ts"],
+      "cwd": "${workspaceFolder}/blockchain",
+      "console": "integratedTerminal",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/blockchain/artifacts/**/*.js"]
+    }
+  ]
+}
