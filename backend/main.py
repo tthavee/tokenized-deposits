@@ -5,6 +5,8 @@ Start with:
     uvicorn main:app --reload
 """
 
+import asyncio
+import contextlib
 import os
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,6 +18,7 @@ from firebase_admin import credentials, firestore
 
 from routers.admin import router as admin_router
 from routers.clients import router as clients_router
+from services.event_listener import run_event_listener
 
 load_dotenv()
 
@@ -46,7 +49,12 @@ async def lifespan(app: FastAPI):
     db = _init_firebase()
     app.state.db = db
     app.state.token_registry = _load_token_registry(db)
+
+    listener_task = asyncio.create_task(run_event_listener(app.state))
     yield
+    listener_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await listener_task
 
 
 # ---------------------------------------------------------------------------
