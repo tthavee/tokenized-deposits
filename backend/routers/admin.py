@@ -17,9 +17,23 @@ from web3 import Web3
 
 from services.wallet import RPC_URLS
 
+
+def _db(request: Request):
+    return request.app.state.db
+
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+_BALANCE_ABI = [
+    {
+        "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    }
+]
 
 _PAUSE_ABI = [
     {
@@ -67,6 +81,14 @@ class PauseResponse(BaseModel):
     network: str
     paused: bool
     tx_hash: str
+
+
+class DiscrepancyEntry(BaseModel):
+    wallet: str
+    asset_type: str
+    network: str
+    on_chain_balance: int
+    firestore_balance: int
 
 
 # ---------------------------------------------------------------------------
@@ -140,3 +162,84 @@ def unpause_contract(
         paused=False,
         tx_hash=tx_hash,
     )
+
+
+@router.get(
+    "/reconcile",
+    response_model=list[DiscrepancyEntry],
+    dependencies=[Depends(_require_admin)],
+)
+def reconcile(
+    db=Depends(_db),
+    token_registry: dict[str, Any] = Depends(_token_registry),
+):
+    """
+    Compare on-chain balances against Firestore-derived balances for every
+    (client, asset_type, network) triple.  Returns only the triples where
+    the two values differ.  An empty list means everything is in sync.
+
+    Firestore balance = sum of confirmed deposits − sum of confirmed withdrawals.
+    """
+    discrepancies: list[DiscrepancyEntry] = []
+
+    client_docs = (
+        db.collection("clients").where("kyc_status", "==", "approved").stream()
+    )
+
+    for client_doc in client_docs:
+        client: dict[str, Any] = client_doc.to_dict()
+        wallet: dict[str, str] = client.get("wallet", {})
+        client_id: str = client.get("id", "")
+
+        for entry in token_registry.values():
+            asset_type: str = entry["asset_type"]
+            network: str = entry["network"]
+            contract_address: str = entry.get("contract_address", "")
+            chain_address: str = wallet.get(network, "")
+
+            if not chain_address or not contract_address:
+                continue
+
+            rpc_url = RPC_URLS.get(network, "")
+            if not rpc_url:
+                continue
+
+            # On-chain balance
+            w3 = Web3(Web3.HTTPProvider(rpc_url))
+            contract = w3.eth.contract(
+                address=Web3.to_checksum_address(contract_address),
+                abi=_BALANCE_ABI,
+            )
+            on_chain_balance: int = contract.functions.balanceOf(
+                Web3.to_checksum_address(chain_address)
+            ).call()
+
+            # Firestore-derived balance: sum confirmed deposits − withdrawals
+            tx_docs = (
+                db.collection("transactions")
+                .where("client_id", "==", client_id)
+                .where("asset_type", "==", asset_type)
+                .where("network", "==", network)
+                .where("status", "==", "confirmed")
+                .stream()
+            )
+            firestore_balance = 0
+            for tx in tx_docs:
+                tx_data: dict[str, Any] = tx.to_dict()
+                if tx_data.get("type") == "deposit":
+                    firestore_balance += tx_data.get("amount", 0)
+                else:
+                    firestore_balance -= tx_data.get("amount", 0)
+
+            if on_chain_balance != firestore_balance:
+                discrepancies.append(
+                    DiscrepancyEntry(
+                        wallet=chain_address,
+                        asset_type=asset_type,
+                        network=network,
+                        on_chain_balance=on_chain_balance,
+                        firestore_balance=firestore_balance,
+                    )
+                )
+
+    return discrepancies

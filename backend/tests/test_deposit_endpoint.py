@@ -4,7 +4,7 @@ Tests for POST /clients/{id}/deposit.
 Firestore and Web3 are mocked — no real node or Firebase project needed.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
@@ -59,6 +59,7 @@ def client(mock_db) -> TestClient:
     with (
         patch("main._init_firebase", return_value=mock_db),
         patch("main._load_token_registry", return_value=REGISTRY),
+        patch("main.run_event_listener", new=AsyncMock()),
     ):
         with TestClient(main.app) as c:
             yield c

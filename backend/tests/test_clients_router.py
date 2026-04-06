@@ -6,7 +6,7 @@ On-chain calls are skipped unless OPERATOR_PRIVATE_KEY is set (tested separately
 by asserting the Web3 mock is/isn't called).
 """
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch, call
 import pytest
 from fastapi.testclient import TestClient
 
@@ -52,6 +52,7 @@ def client(mock_db) -> TestClient:
     with (
         patch("main._init_firebase", return_value=mock_db),
         patch("main._load_token_registry", return_value={}),
+        patch("main.run_event_listener", new=AsyncMock()),
     ):
         with TestClient(main.app) as c:
             yield c
@@ -70,6 +71,7 @@ def client_with_registry(mock_db) -> TestClient:
     with (
         patch("main._init_firebase", return_value=mock_db),
         patch("main._load_token_registry", return_value=registry),
+        patch("main.run_event_listener", new=AsyncMock()),
     ):
         with TestClient(main.app) as c:
             yield c
