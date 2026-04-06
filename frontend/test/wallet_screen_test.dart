@@ -2,14 +2,38 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:tokenized_deposits/main.dart';
 import 'package:tokenized_deposits/models/wallet.dart';
 import 'package:tokenized_deposits/screens/wallet_screen.dart';
+import 'package:tokenized_deposits/services/api_client.dart';
+
+// ---------------------------------------------------------------------------
+// Fakes
+// ---------------------------------------------------------------------------
+
+class _SuccessApiClient extends ApiClient {
+  _SuccessApiClient() : super();
+
+  @override
+  Future<Map<String, dynamic>> createWallet(String clientId) async => {
+        'client_id': clientId,
+        'wallet': {'hardhat': '0xNEW'},
+      };
+}
+
+class _FailApiClient extends ApiClient {
+  _FailApiClient() : super();
+
+  @override
+  Future<Map<String, dynamic>> createWallet(String clientId) async =>
+      throw const ApiException(500, 'RPC error');
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Push WalletScreen onto a navigator with [wallet] as route arguments.
+/// Push WalletScreen with [wallet] as route arguments (existing wallet flow).
 Widget _buildWithArgs(Wallet? wallet) {
   return ProviderScope(
     child: MaterialApp(
@@ -28,15 +52,52 @@ Widget _buildWithArgs(Wallet? wallet) {
   );
 }
 
+/// Push WalletScreen with no route args but with provider overrides.
+Widget _buildWithProviders({
+  String? clientId,
+  Wallet? wallet,
+  ApiClient? api,
+}) {
+  return ProviderScope(
+    overrides: [
+      if (api != null) apiClientProvider.overrideWithValue(api),
+      currentClientIdProvider.overrideWith((ref) => clientId),
+      currentWalletProvider.overrideWith((ref) => wallet),
+    ],
+    child: MaterialApp(
+      home: Builder(
+        builder: (context) => ElevatedButton(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const WalletScreen()),
+          ),
+          child: const Text('open'),
+        ),
+      ),
+    ),
+  );
+}
+
 Future<void> _openWallet(WidgetTester tester, Wallet? wallet) async {
   await tester.pumpWidget(_buildWithArgs(wallet));
   await tester.tap(find.text('open'));
   await tester.pumpAndSettle();
 }
 
+Future<void> _openWithProviders(
+  WidgetTester tester, {
+  String? clientId,
+  Wallet? wallet,
+  ApiClient? api,
+}) async {
+  await tester.pumpWidget(
+      _buildWithProviders(clientId: clientId, wallet: wallet, api: api));
+  await tester.tap(find.text('open'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
 // ---------------------------------------------------------------------------
-// No wallet args
+// No wallet args, no session
 // ---------------------------------------------------------------------------
 
 group('WalletScreen — no args', () {
@@ -48,6 +109,48 @@ group('WalletScreen — no args', () {
   testWidgets('still shows app bar', (tester) async {
     await _openWallet(tester, null);
     expect(find.text('Wallet'), findsOneWidget);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Has clientId but no wallet yet — Create Wallet button
+// ---------------------------------------------------------------------------
+
+group('WalletScreen — create wallet', () {
+  testWidgets('shows Create Wallet button when clientId known but no wallet',
+      (tester) async {
+    await _openWithProviders(tester,
+        clientId: 'client-99', wallet: null, api: _SuccessApiClient());
+    expect(find.byKey(const Key('createWalletButton')), findsOneWidget);
+    expect(find.text('Create Wallet'), findsOneWidget);
+  });
+
+  testWidgets('shows wallet addresses after successful creation', (tester) async {
+    await _openWithProviders(tester,
+        clientId: 'client-99', wallet: null, api: _SuccessApiClient());
+    await tester.tap(find.byKey(const Key('createWalletButton')));
+    await tester.pumpAndSettle();
+    expect(find.text('HARDHAT'), findsOneWidget);
+    expect(find.text('0xNEW'), findsOneWidget);
+  });
+
+  testWidgets('shows error message on creation failure', (tester) async {
+    await _openWithProviders(tester,
+        clientId: 'client-99', wallet: null, api: _FailApiClient());
+    await tester.tap(find.byKey(const Key('createWalletButton')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('RPC error'), findsOneWidget);
+    expect(find.byKey(const Key('createWalletButton')), findsOneWidget);
+  });
+
+  testWidgets('button re-enabled after failure', (tester) async {
+    await _openWithProviders(tester,
+        clientId: 'client-99', wallet: null, api: _FailApiClient());
+    await tester.tap(find.byKey(const Key('createWalletButton')));
+    await tester.pumpAndSettle();
+    final button = tester
+        .widget<FilledButton>(find.byKey(const Key('createWalletButton')));
+    expect(button.onPressed, isNotNull);
   });
 });
 

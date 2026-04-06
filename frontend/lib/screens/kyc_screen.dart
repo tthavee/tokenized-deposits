@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../main.dart';
 import '../providers/kyc_provider.dart';
+import '../services/session_service.dart';
 
 class KycScreen extends ConsumerStatefulWidget {
   const KycScreen({super.key});
@@ -42,7 +44,10 @@ class _KycScreenState extends ConsumerState<KycScreen> {
 
     ref.listen<KycState>(kycProvider, (_, next) {
       switch (next) {
-        case KycSuccess(:final wallet):
+        case KycSuccess(:final client, :final wallet):
+          ref.read(currentClientIdProvider.notifier).state = client.id;
+          ref.read(currentWalletProvider.notifier).state = wallet;
+          SessionService.save(client.id, wallet); // fire-and-forget
           Navigator.of(context).pushReplacementNamed(
             '/wallet',
             arguments: wallet,
