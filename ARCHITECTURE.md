@@ -4,23 +4,26 @@
 
 Tokenized Deposits is a system that represents fiat currency deposits as ERC-20 tokens on a blockchain. When a user deposits USD, tokens are minted to their wallet. When they withdraw, tokens are burned. The token balance is always a 1:1 mirror of their fiat position.
 
-The system has three layers:
+### System Architecture
 
-```
-┌──────────────────────────────────────────────┐
-│  Flutter App (frontend)                      │  ← User interface
-│  lib/screens/, lib/providers/, lib/services/ │
-└─────────────────────┬────────────────────────┘
-                      │ HTTP (REST)
-┌─────────────────────▼────────────────────────┐
-│  FastAPI Backend (backend/)                  │  ← Business logic & orchestration
-│  routers/, services/                         │
-└───────┬─────────────────────────┬────────────┘
-        │ Firebase Admin SDK       │ web3.py / JSON-RPC
-┌───────▼──────────┐   ┌──────────▼─────────────┐
-│  Firestore       │   │  Blockchain (Hardhat /  │
-│  (off-chain DB)  │   │  Sepolia)               │
-└──────────────────┘   └────────────────────────┘
+```mermaid
+graph TD
+    User["👤 User (Browser / Mobile)"]
+    Flutter["Flutter App\nlib/screens, lib/providers, lib/services"]
+    Backend["FastAPI Backend\nrouters/, services/"]
+    Firestore["🔥 Firestore\nclients, transactions,\ntoken_registry, system"]
+    Chain["⛓️ Blockchain\nHardhat / Sepolia"]
+    Contract["DepositToken.sol\nERC-20 + Ownable + Pausable"]
+    EventListener["Event Listener\nasyncio background task"]
+
+    User -->|"interacts with"| Flutter
+    Flutter -->|"HTTP REST"| Backend
+    Backend -->|"Firebase Admin SDK"| Firestore
+    Backend -->|"web3.py / JSON-RPC"| Chain
+    Chain --> Contract
+    EventListener -->|"eth_getLogs every 3s"| Chain
+    EventListener -->|"upsert transaction records"| Firestore
+    Backend -->|"spawns on startup"| EventListener
 ```
 
 ---
@@ -77,6 +80,44 @@ contract DepositToken is ERC20, Ownable, Pausable {
     mapping(address => bool) private _approved;  // KYC allowlist
 ```
 
+### Contract Inheritance
+
+```mermaid
+classDiagram
+    class ERC20 {
+        +balanceOf(address) uint256
+        +transfer(address, uint256) bool
+        +_mint(address, uint256)
+        +_burn(address, uint256)
+    }
+    class Ownable {
+        +owner() address
+        +onlyOwner modifier
+        +transferOwnership(address)
+    }
+    class Pausable {
+        +paused() bool
+        +whenNotPaused modifier
+        +_pause()
+        +_unpause()
+    }
+    class DepositToken {
+        +assetType string
+        +networkLabel string
+        -_approved mapping
+        +registerWallet(address)
+        +revokeWallet(address)
+        +isApproved(address) bool
+        +mint(address, uint256)
+        +burn(address, uint256)
+        +pause()
+        +unpause()
+    }
+    DepositToken --|> ERC20
+    DepositToken --|> Ownable
+    DepositToken --|> Pausable
+```
+
 **Key design decisions:**
 
 | Feature | How it works |
@@ -93,6 +134,47 @@ contract DepositToken is ERC20, Ownable, Pausable {
 ## Firestore Collections
 
 All Firestore access is via the Firebase Admin SDK (backend only). Client-side access is denied in `firestore.rules`.
+
+### Collection Schema
+
+```mermaid
+erDiagram
+    clients {
+        string id PK
+        string first_name
+        string last_name
+        string date_of_birth
+        string national_id
+        string kyc_status
+        string kyc_failure_reason
+        map wallet
+    }
+    transactions {
+        string id PK
+        string client_id FK
+        string type
+        int amount
+        string asset_type
+        string network
+        string status
+        string on_chain_tx_hash
+        string created_at
+    }
+    token_registry {
+        string id PK
+        string contract_address
+        string asset_type
+        string network
+        string deployed_at
+        string deployer_address
+    }
+    system {
+        string id PK
+        int last_processed_block_hardhat
+        int last_processed_block_sepolia
+    }
+    clients ||--o{ transactions : "client_id"
+```
 
 ### `clients/{client_id}`
 ```json
@@ -152,15 +234,25 @@ Used as a cursor so the event listener knows which blocks have already been proc
 
 **File:** `backend/main.py`
 
-```
-uvicorn main:app
-  │
-  ├─ lifespan()
-  │    ├─ _init_firebase()          → connects to Firestore via Admin SDK
-  │    ├─ _load_token_registry()    → reads token_registry/* into app.state.token_registry
-  │    └─ asyncio.create_task(run_event_listener(app.state))  → starts background poller
-  │
-  └─ HTTP server ready
+```mermaid
+sequenceDiagram
+    participant UV as uvicorn
+    participant App as FastAPI app
+    participant FB as Firebase / Firestore
+    participant EL as Event Listener (asyncio task)
+
+    UV->>App: startup (lifespan)
+    App->>FB: initialize_app(credentials)
+    FB-->>App: Firestore client
+    App->>FB: token_registry.stream()
+    FB-->>App: registry docs → app.state.token_registry
+    App->>EL: asyncio.create_task(run_event_listener)
+    Note over EL: runs in background every 3s
+    App-->>UV: yield — HTTP server ready
+
+    UV->>App: shutdown signal
+    App->>EL: listener_task.cancel()
+    EL-->>App: CancelledError (suppressed)
 ```
 
 The `token_registry` dict is kept in `app.state` and shared across all requests. The event listener refreshes it on every poll cycle so newly deployed contracts are picked up without a restart.
@@ -169,117 +261,187 @@ The `token_registry` dict is kept in `app.state` and shared across all requests.
 
 ## User Flows
 
-### 1. KYC + Wallet Creation
+### 1. App Launch & Session Restore
 
-```
-User fills KYC form
-  │
-  ▼
-POST /clients  {first_name, last_name, date_of_birth, national_id}
-  │
-  ├─ KYCService.verify()
-  │    - Validates national_id format: ^[A-Z0-9]{4,20}$
-  │    - Stub: approves all well-formed requests
-  │    - Real implementation would call a third-party KYC provider
-  │
-  ├─ Writes client record to Firestore clients/{id}
-  │
-  ├─ Returns 422 if KYC failed (Flutter shows snackbar)
-  └─ Returns 201 ClientResponse if approved
-  │
-  ▼
-POST /clients/{id}/wallet
-  │
-  ├─ EthereumWalletService.generate_address() per supported network
-  │    - eth_account.Account.create() → new private key → address
-  │    - Note: private key is discarded; the backend operator key signs all transactions
-  │
-  ├─ Writes wallet addresses to clients/{id}.wallet
-  │
-  └─ If OPERATOR_PRIVATE_KEY is set:
-       calls registerWallet(address) on each DepositToken contract
-       so the address passes the on-chain KYC allowlist check
-```
-
-**Flutter side:** `KycNotifier` in `providers/kyc_provider.dart` sequences these two calls, updates `currentClientIdProvider` and `currentWalletProvider`, calls `SessionService.save()` to persist to SharedPreferences, then navigates to the Wallet screen.
-
----
-
-### 2. Deposit (Fiat → Tokens)
-
-```
-User submits deposit form {amount, asset_type, network}
-  │
-  ▼
-POST /clients/{id}/deposit
-  │
-  ├─ Looks up client.wallet.{network} → chain_address
-  ├─ Looks up token_registry["{asset_type}_{network}"] → contract_address
-  │
-  ├─ Creates a "pending" transaction record in Firestore
-  │
-  ├─ Checks contract.paused() → 503 if paused
-  │
-  ├─ Calls contract.mint(chain_address, amount) via operator key
-  │    - Builds tx, signs with OPERATOR_PRIVATE_KEY, broadcasts via RPC
-  │
-  ├─ Updates transaction record to "confirmed" + on_chain_tx_hash
-  └─ Returns {transaction_id, status, on_chain_tx_hash}
-```
-
-**On-chain effect:** The token balance for `chain_address` increases by `amount`. A `Mint` event is emitted.
-
----
-
-### 3. Withdrawal (Tokens → Fiat)
-
-```
-POST /clients/{id}/withdraw
-  │
-  ├─ Same contract/address resolution as deposit
-  │
-  ├─ Calls contract.balanceOf(chain_address) to verify sufficient balance
-  │    - Returns 422 "Insufficient token balance" if balance < amount
-  │
-  ├─ Creates "pending" transaction record
-  │
-  ├─ Calls contract.burn(chain_address, amount) via operator key
-  │
-  ├─ Updates transaction to "confirmed"
-  └─ Returns {transaction_id, status, on_chain_tx_hash}
+```mermaid
+flowchart TD
+    A([App Launch]) --> B[WidgetsFlutterBinding.ensureInitialized]
+    B --> C[SessionService.loadClientId]
+    C --> D{Saved session\nexists?}
+    D -- Yes --> E[Seed currentClientIdProvider\n+ currentWalletProvider]
+    D -- No --> F[Providers start as null]
+    E --> G[runApp with ProviderScope overrides]
+    F --> G
+    G --> H{clientId\nin provider?}
+    H -- Yes --> I[Home shows\nSigned in as clientId\n+ Clear session tile]
+    H -- No --> J[Home shows nav\nto KYC]
+    I --> K[Deposit/Withdraw and Wallet\nscreens work immediately]
 ```
 
 ---
 
-### 4. Event Listener (Background Reconciliation)
+### 2. KYC + Wallet Creation
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Flutter KycScreen
+    participant KN as KycNotifier
+    participant API as FastAPI /clients
+    participant KYC as KYCService
+    participant FS as Firestore
+    participant Chain as Blockchain
+
+    User->>UI: Fill form + Submit
+    UI->>KN: submit(firstName, lastName, dob, nationalId)
+    KN->>KN: state = KycLoading
+    KN->>API: POST /clients
+    API->>KYC: verify(KYCRequest)
+    KYC-->>API: KYCResult(approved=true)
+    API->>FS: clients/{id}.set(record)
+    API-->>KN: 201 ClientResponse
+
+    KN->>API: POST /clients/{id}/wallet
+    API->>API: generate address per network\n(eth_account.Account.create)
+    API->>FS: clients/{id}.update(wallet)
+    API->>Chain: registerWallet(address)\nper DepositToken contract
+    Chain-->>API: tx receipt
+    API-->>KN: 200 WalletResponse
+
+    KN->>KN: state = KycSuccess(client, wallet)
+    KN->>UI: ref.listen triggers
+    UI->>UI: set currentClientIdProvider\nset currentWalletProvider
+    UI->>UI: SessionService.save(clientId, wallet)
+    UI->>UI: Navigator.pushReplacementNamed /wallet
+```
+
+**KYC failure path:**
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Flutter KycScreen
+    participant KN as KycNotifier
+    participant API as FastAPI /clients
+
+    User->>UI: Submit with invalid national_id
+    UI->>KN: submit(...)
+    KN->>API: POST /clients
+    API-->>KN: 422 {kyc_failure_reason: "..."}
+    KN->>KN: state = KycError(message)
+    KN->>UI: ref.listen triggers
+    UI->>UI: ScaffoldMessenger.showSnackBar
+    UI->>UI: stays on KycScreen\nbutton re-enabled
+```
+
+---
+
+### 3. Deposit (Fiat → Tokens)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Flutter DepositWithdrawScreen
+    participant TN as TxNotifier
+    participant API as FastAPI /deposit
+    participant FS as Firestore
+    participant Chain as Blockchain
+    participant CT as DepositToken contract
+
+    User->>UI: Enter amount, asset_type, network → Deposit
+    UI->>TN: deposit(clientId, amount, assetType, network)
+    TN->>TN: state = TxLoading
+    TN->>API: POST /clients/{id}/deposit
+
+    API->>FS: clients/{id}.get() → chain_address
+    API->>API: token_registry lookup → contract_address
+    API->>FS: transactions/{txId}.set(status=pending)
+    API->>Chain: contract.paused().call()
+    Chain-->>API: false
+
+    API->>Chain: contract.mint(chain_address, amount)\nsigned with OPERATOR_PRIVATE_KEY
+    Chain->>CT: mint()
+    CT->>CT: _approved[wallet] check
+    CT->>CT: _mint(address, amount)
+    CT-->>Chain: emit Mint(recipient, amount)
+    Chain-->>API: tx_hash
+
+    API->>FS: transactions/{txId}.update(confirmed, tx_hash)
+    API-->>TN: {transaction_id, status: confirmed}
+
+    TN->>TN: state = TxSuccess(transactionId)
+    TN->>UI: ref.listen triggers
+    UI->>UI: showSnackBar "Transaction confirmed"
+    UI->>UI: ref.invalidate(balancesProvider)\n→ refreshes balance display
+```
+
+---
+
+### 4. Withdrawal (Tokens → Fiat)
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Flutter DepositWithdrawScreen
+    participant TN as TxNotifier
+    participant API as FastAPI /withdraw
+    participant FS as Firestore
+    participant Chain as Blockchain
+    participant CT as DepositToken contract
+
+    User->>UI: Enter amount → Withdraw
+    UI->>TN: withdraw(clientId, amount, assetType, network)
+    TN->>API: POST /clients/{id}/withdraw
+
+    API->>FS: clients/{id}.get() → chain_address
+    API->>Chain: contract.balanceOf(chain_address)
+    Chain-->>API: current_balance
+
+    alt balance < amount
+        API-->>TN: 422 Insufficient token balance
+        TN->>TN: state = TxError
+        TN->>UI: showSnackBar error
+    else balance >= amount
+        API->>FS: transactions/{txId}.set(pending)
+        API->>Chain: contract.burn(chain_address, amount)\nsigned with OPERATOR_PRIVATE_KEY
+        Chain->>CT: burn()
+        CT->>CT: _burn(address, amount)
+        CT-->>Chain: emit Burn(source, amount)
+        Chain-->>API: tx_hash
+        API->>FS: transactions/{txId}.update(confirmed)
+        API-->>TN: {transaction_id, status: confirmed}
+        TN->>UI: showSnackBar confirmed
+    end
+```
+
+---
+
+### 5. Event Listener (Background Sync)
 
 **File:** `backend/services/event_listener.py`
 
-The event listener runs as an `asyncio` background task. It runs every 3 seconds and acts as the source of truth for on-chain events, creating Firestore records for any mint/burn that happened directly on-chain (e.g. manual operator transactions) rather than through the API.
+```mermaid
+flowchart TD
+    Start([asyncio task starts]) --> Loop[/Every 3 seconds/]
+    Loop --> Refresh[Refresh token_registry\nfrom Firestore]
+    Refresh --> Group[Group contracts by network]
+    Group --> ForNet[For each network]
 
-```
-Every 3 seconds:
-  │
-  ├─ Refresh token_registry from Firestore
-  │
-  ├─ For each network (hardhat, sepolia):
-  │    │
-  │    ├─ Read cursor: system/event_listener.last_processed_block_{network}
-  │    │
-  │    ├─ eth_getLogs(fromBlock=cursor+1, toBlock=latest,
-  │    │              address=[all contracts on this network],
-  │    │              topics=[[MINT_TOPIC, BURN_TOPIC]])
-  │    │
-  │    ├─ For each log:
-  │    │    ├─ Decode: topics[1][-20:] → wallet address (ABI-encoded, left-padded)
-  │    │    ├─ Decode: data → amount (uint256, big-endian)
-  │    │    ├─ Idempotency check: skip if transactions.on_chain_tx_hash == tx_hash
-  │    │    ├─ Lookup client_id: clients.where(wallet.{network} == address)
-  │    │    └─ Write transaction record with retry (up to 3 attempts)
-  │    │
-  │    └─ Advance cursor to latest_block (only after all events processed)
-  │
-  └─ sleep(3)
+    ForNet --> ReadCursor[Read cursor:\nsystem/event_listener\n.last_processed_block_network]
+    ReadCursor --> GetLatest[eth.block_number]
+    GetLatest --> Check{cursor >= latest?}
+    Check -- Yes --> Sleep[sleep 3s → Loop]
+    Check -- No --> GetLogs["eth_getLogs(\n  fromBlock=cursor+1,\n  toBlock=latest,\n  address=contracts,\n  topics=[MINT, BURN]\n)"]
+
+    GetLogs --> ForLog[For each log]
+    ForLog --> Decode["Decode log:\n• topics[1][-20:] → wallet\n• data → amount (uint256)\n• transactionHash → tx_hash"]
+    Decode --> IdCheck{transactions where\non_chain_tx_hash == tx_hash\nexists?}
+    IdCheck -- Yes → skip --> ForLog
+    IdCheck -- No --> FindClient["_find_client_id:\nclients.where(wallet.network == address)"]
+    FindClient --> Write["_write_with_retry:\ntransactions/tx_hash .set(record)\n(up to 3 attempts)"]
+    Write --> ForLog
+    ForLog --> AdvanceCursor[Advance cursor\nto latest_block]
+    AdvanceCursor --> ForNet
+    ForNet --> Sleep
 ```
 
 **Topic computation:**
@@ -291,20 +453,29 @@ These match the `event Mint(address indexed recipient, uint256 amount)` signatur
 
 ---
 
-### 5. Admin — Reconciliation
+### 6. Admin — Reconciliation
 
 **Endpoint:** `GET /admin/reconcile` (requires `X-API-Key` header)
 
-Compares on-chain balance vs. Firestore-derived balance for every `(client, asset_type, network)` triple. Returns only discrepancies.
-
+```mermaid
+flowchart TD
+    Start([GET /admin/reconcile]) --> Auth{X-API-Key\nvalid?}
+    Auth -- No --> 401[401 Unauthorized]
+    Auth -- Yes --> Clients["Query Firestore:\nclients where kyc_status == approved"]
+    Clients --> ForClient[For each client]
+    ForClient --> ForToken[For each token_registry entry]
+    ForToken --> Resolve[Resolve chain_address\nfrom client.wallet.network]
+    Resolve --> Skip{chain_address\nor contract_address\nmissing?}
+    Skip -- Yes --> ForToken
+    Skip -- No --> OnChain["contract.balanceOf(chain_address)\n→ on_chain_balance"]
+    OnChain --> FSBalance["Firestore balance:\nΣ confirmed deposits\n− Σ confirmed withdrawals\nfor this client + asset + network"]
+    FSBalance --> Compare{on_chain\n==\nfirestore?}
+    Compare -- Yes → in sync --> ForToken
+    Compare -- No --> Append[Append DiscrepancyEntry]
+    Append --> ForToken
+    ForToken --> ForClient
+    ForClient --> Return["Return list of discrepancies\n(empty = all in sync)"]
 ```
-Firestore balance = Σ confirmed deposits − Σ confirmed withdrawals
-On-chain balance  = contract.balanceOf(wallet_address)
-
-If on_chain ≠ firestore → reported as a DiscrepancyEntry
-```
-
-This catches cases where on-chain state diverged from Firestore records (e.g. direct contract calls bypassing the API, failed Firestore writes after a successful on-chain tx).
 
 ---
 
@@ -312,21 +483,72 @@ This catches cases where on-chain state diverged from Firestore records (e.g. di
 
 **Library:** Riverpod 2.x (`flutter_riverpod`)
 
-### Global providers (`lib/main.dart`)
+### Provider Dependency Graph
 
-| Provider | Type | Purpose |
-|---|---|---|
-| `apiClientProvider` | `Provider<ApiClient>` | Singleton HTTP client, overridable in tests |
-| `currentClientIdProvider` | `StateProvider<String?>` | Active session client ID, seeded from SharedPreferences |
-| `currentWalletProvider` | `StateProvider<Wallet?>` | Active session wallet, seeded from SharedPreferences |
+```mermaid
+graph TD
+    ACP["apiClientProvider\nProvider&lt;ApiClient&gt;"]
+    CCI["currentClientIdProvider\nStateProvider&lt;String?&gt;"]
+    CWP["currentWalletProvider\nStateProvider&lt;Wallet?&gt;"]
+    KYC["kycProvider\nStateNotifierProvider&lt;KycNotifier, KycState&gt;"]
+    TX["txProvider\nStateNotifierProvider&lt;TxNotifier, TxState&gt;"]
+    BAL["balancesProvider\nFutureProvider.family&lt;List&lt;BalanceEntry&gt;, String&gt;"]
 
-### Feature providers
+    ACP --> KYC
+    ACP --> TX
+    ACP --> BAL
 
-| Provider | File | Purpose |
-|---|---|---|
-| `kycProvider` | `providers/kyc_provider.dart` | `KycState` (Idle/Loading/Success/Error) for the KYC + wallet creation flow |
-| `txProvider` | `providers/deposit_withdraw_provider.dart` | `TxState` for deposit/withdraw operations |
-| `balancesProvider` | `providers/deposit_withdraw_provider.dart` | `FutureProvider.family<List<BalanceEntry>, String>` — fetches all balances for a clientId |
+    KYC -->|"on success: sets"| CCI
+    KYC -->|"on success: sets"| CWP
+
+    CCI -->|"read by"| DepositWithdrawScreen
+    CWP -->|"read by"| WalletScreen
+    BAL -->|"watched by"| DepositWithdrawScreen
+    TX -->|"watched by"| DepositWithdrawScreen
+    KYC -->|"watched by"| KycScreen
+```
+
+### Sealed State Classes
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> KycIdle
+    KycIdle --> KycLoading: submit()
+    KycLoading --> KycSuccess: API ok
+    KycLoading --> KycError: API error
+    KycSuccess --> KycIdle: reset()
+    KycError --> KycIdle: reset()
+
+    note right of KycSuccess
+        Triggers navigation to /wallet
+        Sets currentClientIdProvider
+        Sets currentWalletProvider
+        Calls SessionService.save()
+    end note
+
+    note right of KycError
+        Shows SnackBar with message
+        Re-enables submit button
+    end note
+```
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> TxIdle
+    TxIdle --> TxLoading: deposit() / withdraw()
+    TxLoading --> TxSuccess: API ok
+    TxLoading --> TxError: API error
+    TxSuccess --> TxIdle: reset()
+    TxError --> TxIdle: reset()
+
+    note right of TxSuccess
+        Shows confirmation SnackBar
+        Invalidates balancesProvider
+        → triggers balance refresh
+    end note
+```
 
 ### Session persistence (`lib/services/session_service.dart`)
 
