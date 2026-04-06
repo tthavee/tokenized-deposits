@@ -14,6 +14,7 @@ from typing import Any
 import firebase_admin
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import credentials, firestore
 
 from routers.admin import router as admin_router
@@ -61,6 +62,16 @@ async def lifespan(app: FastAPI):
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(title="Tokenized Deposits API", lifespan=lifespan)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(clients_router)
 app.include_router(admin_router)
 
