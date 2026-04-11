@@ -1,16 +1,89 @@
 {
   "version": "0.2.0",
   "configurations": [
+    // -------------------------------------------------------------------------
+    // Debug the full Hardhat test suite (F5 from any file in blockchain/)
+    // Set breakpoints in test/DepositToken.test.ts → step through contract calls
+    // -------------------------------------------------------------------------
     {
       "type": "node",
       "request": "launch",
-      "name": "Hardhat Test (debug)",
+      "name": "Hardhat: Run all tests",
       "program": "${workspaceFolder}/blockchain/node_modules/.bin/hardhat",
-      "args": ["test", "test/DepositToken.test.ts"],
+      "args": ["test"],
       "cwd": "${workspaceFolder}/blockchain",
       "console": "integratedTerminal",
       "sourceMaps": true,
       "outFiles": ["${workspaceFolder}/blockchain/artifacts/**/*.js"]
+    },
+
+    // -------------------------------------------------------------------------
+    // Debug a single test file — useful when iterating on one scenario
+    // -------------------------------------------------------------------------
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Hardhat: Debug active test file",
+      "program": "${workspaceFolder}/blockchain/node_modules/.bin/hardhat",
+      "args": ["test", "${relativeFile}"],
+      "cwd": "${workspaceFolder}/blockchain",
+      "console": "integratedTerminal",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/blockchain/artifacts/**/*.js"]
+    },
+
+    // -------------------------------------------------------------------------
+    // Debug the deploy script against the local node
+    // Start `npx hardhat node` first, then F5 this config
+    // -------------------------------------------------------------------------
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Hardhat: Debug deploy script",
+      "program": "${workspaceFolder}/blockchain/node_modules/.bin/hardhat",
+      "args": [
+        "run", "scripts/deploy.ts",
+        "--network", "localhost"
+      ],
+      "cwd": "${workspaceFolder}/blockchain",
+      "console": "integratedTerminal",
+      "sourceMaps": true,
+      "outFiles": ["${workspaceFolder}/blockchain/artifacts/**/*.js"]
+    },
+
+    // -------------------------------------------------------------------------
+    // Debug the FastAPI backend (Python)
+    // -------------------------------------------------------------------------
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "name": "FastAPI: uvicorn",
+      "module": "uvicorn",
+      "args": ["main:app", "--reload", "--port", "8000"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+
+    // -------------------------------------------------------------------------
+    // Debug a single pytest file or test
+    // Open the test file, then F5 this config
+    // -------------------------------------------------------------------------
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "name": "pytest: Debug active test file",
+      "module": "pytest",
+      "args": ["${file}", "-v", "-s"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
     }
   ]
 }
