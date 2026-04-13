@@ -48,11 +48,19 @@ class _SuccessApiClient extends ApiClient {
       {'transaction_id': 'tx-withdraw-1', 'status': 'confirmed', 'on_chain_tx_hash': '0xdef'};
 }
 
+/// Balances load but transactions fail — tests deposit/withdraw failure paths.
 class _FailApiClient extends ApiClient {
   _FailApiClient() : super();
 
   @override
-  Future<List<dynamic>> getBalances(String clientId) async => [];
+  Future<List<dynamic>> getBalances(String clientId) async => [
+        {
+          'asset_type': 'USD',
+          'network': 'hardhat',
+          'chain_address': '0x1234',
+          'balance': 0,
+        },
+      ];
 
   @override
   Future<Map<String, dynamic>> deposit({
@@ -71,6 +79,14 @@ class _FailApiClient extends ApiClient {
     required String network,
   }) async =>
       throw const ApiException(422, 'Insufficient token balance');
+}
+
+/// Returns no balances — used to test the empty-balances display.
+class _EmptyBalancesApiClient extends ApiClient {
+  _EmptyBalancesApiClient() : super();
+
+  @override
+  Future<List<dynamic>> getBalances(String clientId) async => [];
 }
 
 // ---------------------------------------------------------------------------
@@ -113,8 +129,18 @@ Future<void> _fillForm(
   String network = 'hardhat',
 }) async {
   await tester.enterText(find.byKey(const Key('amountField')), amount);
-  await tester.enterText(find.byKey(const Key('assetTypeField')), assetType);
-  await tester.enterText(find.byKey(const Key('networkField')), network);
+
+  // Open asset type dropdown and select.
+  await tester.tap(find.byKey(const Key('assetTypeField')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(assetType).last);
+  await tester.pumpAndSettle();
+
+  // Open network dropdown and select.
+  await tester.tap(find.byKey(const Key('networkField')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(network).last);
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -164,7 +190,7 @@ group('DepositWithdrawScreen — rendering', () {
   });
 
   testWidgets('shows "No balances found" when list is empty', (tester) async {
-    await _openScreen(tester, 'client-1', _FailApiClient());
+    await _openScreen(tester, 'client-1', _EmptyBalancesApiClient());
     expect(find.text('No balances found.'), findsOneWidget);
   });
 });

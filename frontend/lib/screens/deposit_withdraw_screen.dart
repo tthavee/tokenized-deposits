@@ -17,34 +17,34 @@ class _DepositWithdrawScreenState
     extends ConsumerState<DepositWithdrawScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountCtrl = TextEditingController();
-  final _assetTypeCtrl = TextEditingController();
-  final _networkCtrl = TextEditingController();
+  String? _selectedAssetType;
+  String? _selectedNetwork;
   String _txType = 'deposit';
 
   @override
   void dispose() {
     _amountCtrl.dispose();
-    _assetTypeCtrl.dispose();
-    _networkCtrl.dispose();
     super.dispose();
   }
 
   void _submit(String clientId) {
     if (!_formKey.currentState!.validate()) return;
     final amount = int.parse(_amountCtrl.text.trim());
+    final assetType = _selectedAssetType!;
+    final network = _selectedNetwork!;
     if (_txType == 'deposit') {
       ref.read(txProvider.notifier).deposit(
             clientId: clientId,
             amount: amount,
-            assetType: _assetTypeCtrl.text.trim(),
-            network: _networkCtrl.text.trim(),
+            assetType: assetType,
+            network: network,
           );
     } else {
       ref.read(txProvider.notifier).withdraw(
             clientId: clientId,
             amount: amount,
-            assetType: _assetTypeCtrl.text.trim(),
-            network: _networkCtrl.text.trim(),
+            assetType: assetType,
+            network: network,
           );
     }
   }
@@ -66,6 +66,19 @@ class _DepositWithdrawScreenState
 
     final isLoading = ref.watch(txProvider) is TxLoading;
     final balancesAsync = ref.watch(balancesProvider(clientId));
+
+    // Derive selector options from loaded balances (preserved across reloads via
+    // Riverpod's AsyncLoading.valueOrNull returning previous data).
+    final balances = balancesAsync.valueOrNull ?? [];
+    final assetTypes = balances.map((b) => b.assetType).toSet().toList()
+      ..sort();
+    final networks = balances
+        .where((b) =>
+            _selectedAssetType == null || b.assetType == _selectedAssetType)
+        .map((b) => b.network)
+        .toSet()
+        .toList()
+      ..sort();
 
     ref.listen<TxState>(txProvider, (_, next) {
       switch (next) {
@@ -140,26 +153,35 @@ class _DepositWithdrawScreenState
                     },
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
+                  DropdownButtonFormField<String>(
                     key: const Key('assetTypeField'),
-                    controller: _assetTypeCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Asset type',
-                      hintText: 'e.g. USD',
-                    ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    decoration: const InputDecoration(labelText: 'Asset type'),
+                    value: _selectedAssetType,
+                    hint: const Text('Select asset type'),
+                    items: assetTypes
+                        .map((t) =>
+                            DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (v) => setState(() {
+                      _selectedAssetType = v;
+                      _selectedNetwork = null;
+                    }),
+                    validator: (v) => v == null ? 'Required' : null,
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
+                  DropdownButtonFormField<String>(
                     key: const Key('networkField'),
-                    controller: _networkCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Network',
-                      hintText: 'e.g. hardhat',
-                    ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    decoration: const InputDecoration(labelText: 'Network'),
+                    value: _selectedNetwork,
+                    hint: const Text('Select network'),
+                    items: networks
+                        .map((n) =>
+                            DropdownMenuItem(value: n, child: Text(n)))
+                        .toList(),
+                    onChanged: _selectedAssetType == null
+                        ? null
+                        : (v) => setState(() => _selectedNetwork = v),
+                    validator: (v) => v == null ? 'Required' : null,
                   ),
                   const SizedBox(height: 32),
                   FilledButton(
