@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tokenized_deposits/main.dart';
-import 'package:tokenized_deposits/models/wallet.dart';
 import 'package:tokenized_deposits/screens/kyc_screen.dart';
 import 'package:tokenized_deposits/screens/wallet_screen.dart';
 import 'package:tokenized_deposits/services/api_client.dart';

@@ -156,7 +156,7 @@ class _DepositWithdrawScreenState
                   DropdownButtonFormField<String>(
                     key: const Key('assetTypeField'),
                     decoration: const InputDecoration(labelText: 'Asset type'),
-                    value: _selectedAssetType,
+                    initialValue: _selectedAssetType,
                     hint: const Text('Select asset type'),
                     items: assetTypes
                         .map((t) =>
@@ -172,7 +172,7 @@ class _DepositWithdrawScreenState
                   DropdownButtonFormField<String>(
                     key: const Key('networkField'),
                     decoration: const InputDecoration(labelText: 'Network'),
-                    value: _selectedNetwork,
+                    initialValue: _selectedNetwork,
                     hint: const Text('Select network'),
                     items: networks
                         .map((n) =>
