@@ -331,12 +331,11 @@ class TestPollNetwork:
     RPC = "http://127.0.0.1:8545"
 
     def _call(self, db, w3):
-        with patch("services.event_listener.Web3", return_value=w3) as MockWeb3:
-            MockWeb3.HTTPProvider = MagicMock()
+        with patch("services.event_listener.Web3") as MockWeb3:
             MockWeb3.to_checksum_address = lambda x: (
                 x if isinstance(x, str) else ("0x" + x.hex())
             )
-            _poll_network(db, NETWORK, CONTRACTS, self.RPC)
+            _poll_network(db, NETWORK, CONTRACTS, self.RPC, w3)
 
     def test_no_op_when_already_at_latest_block(self):
         db = _mock_db(last_block=100)
@@ -458,7 +457,7 @@ class TestRunOnce:
         ]
 
         with patch("services.event_listener.RPC_URLS", {"hardhat": ""}):
-            _run_once(app_state)
+            _run_once(app_state, {})
 
         assert app_state.token_registry == new_registry
 
@@ -471,7 +470,7 @@ class TestRunOnce:
 
         with patch("services.event_listener.RPC_URLS", {"hardhat": ""}):
             with patch("services.event_listener._poll_network") as mock_poll:
-                _run_once(app_state)
+                _run_once(app_state, {})
 
         mock_poll.assert_not_called()
 
@@ -487,7 +486,7 @@ class TestRunOnce:
 
         with patch("services.event_listener.RPC_URLS", {"hardhat": "http://localhost:8545"}):
             with patch("services.event_listener._poll_network") as mock_poll:
-                _run_once(app_state)
+                _run_once(app_state, {})
 
         # Both USD and EUR are on hardhat — one poll call for that network.
         mock_poll.assert_called_once()
@@ -508,7 +507,7 @@ class TestRunOnce:
 
         poll_calls = []
 
-        def boom_then_ok(db, network, contracts, rpc_url):
+        def boom_then_ok(db, network, contracts, rpc_url, w3):
             poll_calls.append(network)
             if network == "hardhat":
                 raise Exception("RPC down")
@@ -518,7 +517,7 @@ class TestRunOnce:
             "sepolia": "http://localhost:9545",
         }):
             with patch("services.event_listener._poll_network", side_effect=boom_then_ok):
-                _run_once(app_state)
+                _run_once(app_state, {})
 
         assert "hardhat" in poll_calls
         assert "sepolia" in poll_calls

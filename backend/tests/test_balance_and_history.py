@@ -180,8 +180,10 @@ class TestGetBalances:
             exists=True, data=APPROVED_CLIENT
         )
         w3 = _mock_w3(balance=500)
+        rpc_urls = {"hardhat": "http://localhost:8545", "sepolia": "http://localhost:9545"}
         with (
             patch("routers.clients.Web3", return_value=w3) as MockWeb3,
+            patch("routers.clients.RPC_URLS", rpc_urls),
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
