@@ -517,14 +517,24 @@ def get_balances(
             )
             continue
 
-        w3 = Web3(Web3.HTTPProvider(RPC_URLS.get(network, "")))
+        rpc_url = RPC_URLS.get(network, "")
+        if not rpc_url:
+            continue  # skip networks with no RPC configured (e.g. stale registry entries)
+
+        w3 = Web3(Web3.HTTPProvider(rpc_url))
         contract = w3.eth.contract(
             address=Web3.to_checksum_address(contract_address),
             abi=_DEPOSIT_TOKEN_ABI,
         )
-        balance = contract.functions.balanceOf(
-            Web3.to_checksum_address(chain_address)
-        ).call()
+        try:
+            balance = contract.functions.balanceOf(
+                Web3.to_checksum_address(chain_address)
+            ).call()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Contract unreachable for {asset_type}/{network} — redeploy required: {exc}",
+            )
         results.append(
             BalanceEntry(
                 asset_type=asset_type,

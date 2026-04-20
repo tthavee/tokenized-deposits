@@ -39,7 +39,10 @@ async function main(): Promise<void> {
   const [deployer] = await ethers.getSigners();
 
   const assetType = getFlag("--asset-type", process.env.ASSET_TYPE ?? "USD");
-  const networkLabel = getFlag("--network-label", process.env.NETWORK_LABEL ?? network.name);
+  // Map Hardhat's internal "localhost" network name to "hardhat" so it matches
+  // the backend's RPC_URLS and SUPPORTED_NETWORKS keys.
+  const defaultLabel = network.name === "localhost" ? "hardhat" : network.name;
+  const networkLabel = getFlag("--network-label", process.env.NETWORK_LABEL ?? defaultLabel);
 
   console.log("Deploying contracts with account:", deployer.address);
   console.log(

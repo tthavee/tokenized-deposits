@@ -41,9 +41,11 @@ BURN_TOPIC: str = Web3.keccak(text="Burn(address,uint256)").hex()
 async def run_event_listener(app_state) -> None:
     """Async background task: poll every POLL_INTERVAL seconds."""
     print("[event_listener] started")
+    # One persistent Web3 instance per network — never recreated between polls.
+    w3_cache: dict[str, Web3] = {}
     while True:
         try:
-            _run_once(app_state)
+            _run_once(app_state, w3_cache)
         except Exception as exc:
             print(f"[event_listener] unexpected error: {exc}")
         await asyncio.sleep(POLL_INTERVAL)
@@ -53,7 +55,7 @@ async def run_event_listener(app_state) -> None:
 # Single poll cycle
 # ---------------------------------------------------------------------------
 
-def _run_once(app_state) -> None:
+def _run_once(app_state, w3_cache: dict[str, Web3]) -> None:
     db: firestore.Client = app_state.db
 
     # Refresh registry so newly deployed contracts are picked up automatically.
@@ -73,7 +75,9 @@ def _run_once(app_state) -> None:
         if not rpc_url:
             continue
         try:
-            _poll_network(db, network, contracts, rpc_url)
+            if network not in w3_cache:
+                w3_cache[network] = Web3(Web3.HTTPProvider(rpc_url))
+            _poll_network(db, network, contracts, rpc_url, w3_cache[network])
         except Exception as exc:
             print(f"[event_listener] error polling {network}: {exc}")
 
@@ -87,10 +91,9 @@ def _poll_network(
     network: str,
     contracts: dict[str, Any],
     rpc_url: str,
+    w3: Web3,
 ) -> None:
     """Fetch new logs for *network* and upsert Firestore records."""
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
-
     # Read the per-network block cursor from Firestore.
     cursor_key = f"last_processed_block_{network}"
     cursor_doc = db.collection("system").document("event_listener").get()
