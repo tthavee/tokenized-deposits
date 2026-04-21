@@ -4,3 +4,4 @@ cache/
 deployment.json
 deployment-*.json
 .hardhat-state.json
+.env
