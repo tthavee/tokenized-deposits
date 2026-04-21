@@ -11,8 +11,11 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
-import firebase_admin
 from dotenv import load_dotenv
+
+load_dotenv()
+
+import firebase_admin
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import credentials, firestore
@@ -20,8 +23,6 @@ from firebase_admin import credentials, firestore
 from routers.admin import router as admin_router
 from routers.clients import router as clients_router
 from services.event_listener import run_event_listener
-
-load_dotenv()
 
 
 def _init_firebase() -> firestore.Client:

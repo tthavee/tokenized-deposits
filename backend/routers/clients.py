@@ -235,7 +235,10 @@ def create_wallet(
             rpc_url = RPC_URLS.get(network, "")
             if not rpc_url:
                 continue
-            _register_on_chain(token_registry, network, address, rpc_url, operator_key)
+            try:
+                _register_on_chain(token_registry, network, address, rpc_url, operator_key)
+            except Exception as exc:
+                print(f"[wallet] on-chain registration skipped for {network}: {exc}")
 
     return WalletResponse(client_id=client_id, wallet=wallet)
 
@@ -314,7 +317,7 @@ def create_deposit(
         operator = w3.eth.account.from_key(operator_key)
         tx = contract.functions.mint(
             Web3.to_checksum_address(chain_address),
-            body.amount,
+            body.amount * 10**18,
         ).build_transaction(
             {
                 "from": operator.address,
@@ -393,6 +396,7 @@ def create_withdrawal(
     balance = contract.functions.balanceOf(
         Web3.to_checksum_address(chain_address)
     ).call()
+    balance = balance // 10**18
     if balance < body.amount:
         raise HTTPException(
             status_code=422,
@@ -420,7 +424,7 @@ def create_withdrawal(
         operator = w3.eth.account.from_key(operator_key)
         tx = contract.functions.burn(
             Web3.to_checksum_address(chain_address),
-            body.amount,
+            body.amount * 10**18,
         ).build_transaction(
             {
                 "from": operator.address,
@@ -540,7 +544,7 @@ def get_balances(
                 asset_type=asset_type,
                 network=network,
                 chain_address=chain_address,
-                balance=balance,
+                balance=balance // 10**18,
             )
         )
 

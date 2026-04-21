@@ -2,8 +2,9 @@
 # start.sh — starts all three project services in one command
 #
 # Usage:
-#   ./start.sh           # start everything
-#   ./start.sh --no-deploy  # start hardhat node + backend + frontend, skip contract deployment
+#   ./start.sh             # start everything (local Hardhat)
+#   ./start.sh --no-deploy # start hardhat node + backend + frontend, skip contract deployment
+#   ./start.sh --sepolia   # deploy to Sepolia instead of local (skips Hardhat node)
 
 set -euo pipefail
 
@@ -13,8 +14,10 @@ BACKEND="$ROOT/backend"
 FRONTEND="$ROOT/frontend"
 
 DEPLOY=true
+SEPOLIA=false
 for arg in "$@"; do
   [[ "$arg" == "--no-deploy" ]] && DEPLOY=false
+  [[ "$arg" == "--sepolia" ]]   && SEPOLIA=true
 done
 
 # ── colours ──────────────────────────────────────────────────────────────────
@@ -34,33 +37,42 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# ── 1. Hardhat node ───────────────────────────────────────────────────────────
-log "Starting Hardhat local node..."
-# Kill anything already holding port 8545 (e.g. a leftover from a previous run)
-fuser -k 8545/tcp > /dev/null 2>&1 || true
-cd "$BLOCKCHAIN"
-npm run node > "$ROOT/logs/hardhat.log" 2>&1 &
-HARDHAT_PID=$!
-PIDS+=("$HARDHAT_PID")
+# ── 1. Hardhat node (skipped for Sepolia) ────────────────────────────────────
+if ! $SEPOLIA; then
+  log "Starting Hardhat local node..."
+  # Kill anything already holding port 8545 (e.g. a leftover from a previous run)
+  fuser -k 8545/tcp > /dev/null 2>&1 || true
+  cd "$BLOCKCHAIN"
+  npm run node > "$ROOT/logs/hardhat.log" 2>&1 &
+  HARDHAT_PID=$!
+  PIDS+=("$HARDHAT_PID")
 
-# Wait for the node to be ready (it prints "Started HTTP and WebSocket JSON-RPC server")
-log "Waiting for Hardhat node to be ready..."
-for i in $(seq 1 30); do
-  if grep -q "Started HTTP" "$ROOT/logs/hardhat.log" 2>/dev/null; then
-    log "Hardhat node is up."
-    break
-  fi
-  if grep -q "EADDRINUSE\|Error:" "$ROOT/logs/hardhat.log" 2>/dev/null; then
-    die "Hardhat node failed to start. Check logs/hardhat.log"
-  fi
-  sleep 1
-  if [[ $i -eq 30 ]]; then
-    die "Hardhat node did not start in time. Check logs/hardhat.log"
-  fi
-done
+  # Wait for the node to be ready (it prints "Started HTTP and WebSocket JSON-RPC server")
+  log "Waiting for Hardhat node to be ready..."
+  for i in $(seq 1 30); do
+    if grep -q "Started HTTP" "$ROOT/logs/hardhat.log" 2>/dev/null; then
+      log "Hardhat node is up."
+      break
+    fi
+    if grep -q "EADDRINUSE\|Error:" "$ROOT/logs/hardhat.log" 2>/dev/null; then
+      die "Hardhat node failed to start. Check logs/hardhat.log"
+    fi
+    sleep 1
+    if [[ $i -eq 30 ]]; then
+      die "Hardhat node did not start in time. Check logs/hardhat.log"
+    fi
+  done
+fi
 
 # ── 2. Deploy contracts ───────────────────────────────────────────────────────
-if $DEPLOY; then
+cd "$BLOCKCHAIN"
+if $SEPOLIA && $DEPLOY; then
+  log "Deploying contracts to Sepolia testnet..."
+  ASSET_TYPE=USD NETWORK_LABEL=sepolia npx hardhat run scripts/deploy.ts --network sepolia \
+    >> "$ROOT/logs/hardhat.log" 2>&1 \
+    || die "Sepolia deployment failed. Check logs/hardhat.log"
+  log "Contracts deployed to Sepolia."
+elif $DEPLOY; then
   log "Deploying contracts to local network..."
   npm run deploy:local >> "$ROOT/logs/hardhat.log" 2>&1 \
     || die "Contract deployment failed. Check logs/hardhat.log"
@@ -105,7 +117,7 @@ FLUTTER_PORT=8080
 log "Building Flutter web app..."
 cd "$FRONTEND"
 # flutter requires a TTY even for builds; use `script` to provide one
-script -q -c 'flutter build web --no-wasm-dry-run' /dev/null \
+flutter build web --no-wasm-dry-run \
   > "$ROOT/logs/frontend.log" 2>&1 \
   || die "Flutter build failed. Check logs/frontend.log"
 log "Serving Flutter web app on port $FLUTTER_PORT..."
@@ -117,11 +129,20 @@ PIDS+=("$FRONTEND_PID")
 # ── done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}All services started.${NC}"
-echo "  Hardhat node  → http://localhost:8545       (logs/hardhat.log)"
+if ! $SEPOLIA; then
+  echo "  Hardhat node  → http://localhost:8545       (logs/hardhat.log)"
+fi
 echo "  Backend API   → http://localhost:8000/docs  (logs/backend.log)"
 echo "  Frontend      → http://localhost:$FLUTTER_PORT  (logs/frontend.log)"
+if $SEPOLIA; then
+  CONTRACT=$(node -e "const f=require('$BLOCKCHAIN/deployment-USD-sepolia.json');console.log(f.contractAddress)" 2>/dev/null || true)
+  if [[ -n "$CONTRACT" ]]; then
+    echo ""
+    echo "  Sepolia token → https://sepolia.etherscan.io/token/$CONTRACT"
+  fi
+fi
 echo ""
 echo "Press Ctrl+C to stop everything."
 
 # Keep the script alive so the trap fires on Ctrl+C
-wait "${PIDS[@]}"
+wait "${PIDS[@]:-}"

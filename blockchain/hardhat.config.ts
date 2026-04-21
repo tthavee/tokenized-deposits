@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import "dotenv/config";
 
 // Optional: populate these in .env to enable Sepolia deployment
 const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL ?? "";
