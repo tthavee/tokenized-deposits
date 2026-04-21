@@ -12,6 +12,9 @@ backend/secrets/
 firebase-debug.log*
 *.log
 
+# Startup script logs
+logs/
+
 # Environment variables
 .env
 
