@@ -71,6 +71,11 @@ fi
 log "Starting FastAPI backend..."
 cd "$BACKEND"
 
+if [[ ! -f .env ]]; then
+  warn "No backend/.env found — copying from .env.example (uses Hardhat default keys)"
+  cp .env.example .env
+fi
+
 if [[ ! -d venv ]]; then
   warn "No venv found — creating one and installing dependencies..."
   python3 -m venv venv
