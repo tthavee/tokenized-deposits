@@ -71,6 +71,24 @@ def _token_registry(request: Request) -> dict[str, Any]:
 # Schemas
 # ---------------------------------------------------------------------------
 
+_REGISTER_WALLET_ABI = [
+    {
+        "inputs": [{"internalType": "address", "name": "wallet", "type": "address"}],
+        "name": "registerWallet",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "address", "name": "wallet", "type": "address"}],
+        "name": "isApproved",
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+]
+
+
 class PauseRequest(BaseModel):
     asset_type: str
     network: str
@@ -81,6 +99,17 @@ class PauseResponse(BaseModel):
     network: str
     paused: bool
     tx_hash: str
+
+
+class RegisterWalletsRequest(BaseModel):
+    network: str
+
+
+class RegisterWalletsResponse(BaseModel):
+    network: str
+    registered: list[str]
+    skipped: list[str]
+    failed: list[str]
 
 
 class DiscrepancyEntry(BaseModel):
@@ -161,6 +190,76 @@ def unpause_contract(
         network=body.network,
         paused=False,
         tx_hash=tx_hash,
+    )
+
+
+@router.post(
+    "/register-wallets",
+    response_model=RegisterWalletsResponse,
+    dependencies=[Depends(_require_admin)],
+)
+def register_wallets(
+    body: RegisterWalletsRequest,
+    db=Depends(_db),
+    token_registry: dict[str, Any] = Depends(_token_registry),
+):
+    """
+    Re-register every approved client wallet on *network* that is not yet in the
+    contract's KYC allowlist.  Safe to call multiple times (skips already-approved wallets).
+    """
+    rpc_url = RPC_URLS.get(body.network, "")
+    if not rpc_url:
+        raise HTTPException(status_code=404, detail=f"Unknown network: {body.network}")
+
+    operator_key = os.environ.get("OPERATOR_PRIVATE_KEY", "")
+    if not operator_key:
+        raise HTTPException(status_code=500, detail="OPERATOR_PRIVATE_KEY not configured")
+
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    operator = w3.eth.account.from_key(operator_key)
+
+    # Collect contract addresses for this network
+    contracts = [
+        Web3.to_checksum_address(e["contract_address"])
+        for e in token_registry.values()
+        if e.get("network") == body.network and e.get("contract_address")
+    ]
+    if not contracts:
+        raise HTTPException(status_code=404, detail=f"No contracts for network: {body.network}")
+
+    registered: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+
+    client_docs = db.collection("clients").where("kyc_status", "==", "approved").stream()
+    for client_doc in client_docs:
+        wallet_address = client_doc.to_dict().get("wallet", {}).get(body.network)
+        if not wallet_address:
+            continue
+        checksum_addr = Web3.to_checksum_address(wallet_address)
+
+        for contract_address in contracts:
+            contract = w3.eth.contract(address=contract_address, abi=_REGISTER_WALLET_ABI)
+            try:
+                if contract.functions.isApproved(checksum_addr).call():
+                    skipped.append(wallet_address)
+                    continue
+                nonce = w3.eth.get_transaction_count(operator.address)
+                tx = contract.functions.registerWallet(checksum_addr).build_transaction(
+                    {"from": operator.address, "nonce": nonce, "gas": 100_000}
+                )
+                signed = w3.eth.account.sign_transaction(tx, operator_key)
+                w3.eth.send_raw_transaction(signed.raw_transaction)
+                registered.append(wallet_address)
+            except Exception as exc:
+                print(f"[admin] registerWallet failed for {wallet_address}: {exc}")
+                failed.append(wallet_address)
+
+    return RegisterWalletsResponse(
+        network=body.network,
+        registered=registered,
+        skipped=skipped,
+        failed=failed,
     )
 
 

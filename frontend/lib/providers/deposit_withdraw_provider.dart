@@ -21,8 +21,11 @@ class TxLoading extends TxState {
 }
 
 class TxSuccess extends TxState {
-  const TxSuccess(this.transactionId);
+  const TxSuccess(this.transactionId, {this.gasUsed, this.gasPriceGwei, this.feeEth});
   final String transactionId;
+  final int? gasUsed;
+  final double? gasPriceGwei;
+  final double? feeEth;
 }
 
 class TxError extends TxState {
@@ -53,7 +56,12 @@ class TxNotifier extends StateNotifier<TxState> {
         assetType: assetType,
         network: network,
       );
-      state = TxSuccess(result['transaction_id'] as String);
+      state = TxSuccess(
+        result['transaction_id'] as String,
+        gasUsed: result['gas_used'] as int?,
+        gasPriceGwei: (result['gas_price_gwei'] as num?)?.toDouble(),
+        feeEth: (result['fee_eth'] as num?)?.toDouble(),
+      );
     } on ApiException catch (e) {
       state = TxError(e.detail);
     } catch (e) {
@@ -75,7 +83,12 @@ class TxNotifier extends StateNotifier<TxState> {
         assetType: assetType,
         network: network,
       );
-      state = TxSuccess(result['transaction_id'] as String);
+      state = TxSuccess(
+        result['transaction_id'] as String,
+        gasUsed: result['gas_used'] as int?,
+        gasPriceGwei: (result['gas_price_gwei'] as num?)?.toDouble(),
+        feeEth: (result['fee_eth'] as num?)?.toDouble(),
+      );
     } on ApiException catch (e) {
       state = TxError(e.detail);
     } catch (e) {

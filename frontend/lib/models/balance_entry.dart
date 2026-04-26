@@ -4,17 +4,20 @@ class BalanceEntry {
     required this.network,
     required this.chainAddress,
     required this.balance,
+    this.error,
   });
 
   final String assetType;
   final String network;
   final String chainAddress;
   final int balance;
+  final String? error;
 
   factory BalanceEntry.fromJson(Map<String, dynamic> json) => BalanceEntry(
         assetType: json['asset_type'] as String,
         network: json['network'] as String,
         chainAddress: json['chain_address'] as String,
         balance: json['balance'] as int,
+        error: json['error'] as String?,
       );
 }

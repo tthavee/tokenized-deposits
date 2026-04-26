@@ -88,6 +88,39 @@ class ApiClient {
     return data as List<dynamic>;
   }
 
+  Future<Map<String, dynamic>> getGasEstimate(String network) async =>
+      (await _get('/clients/gas-estimate?network=$network')) as Map<String, dynamic>;
+
+  // -------------------------------------------------------------------------
+  // Admin
+  // -------------------------------------------------------------------------
+
+  Future<Map<String, dynamic>> registerWallets({
+    required String apiKey,
+    required String network,
+  }) async =>
+      (await _adminPost('/admin/register-wallets', {'network': network}, apiKey))
+          as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> pauseContract({
+    required String apiKey,
+    required String assetType,
+    required String network,
+  }) async =>
+      (await _adminPost('/admin/pause', {'asset_type': assetType, 'network': network}, apiKey))
+          as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> unpauseContract({
+    required String apiKey,
+    required String assetType,
+    required String network,
+  }) async =>
+      (await _adminPost('/admin/unpause', {'asset_type': assetType, 'network': network}, apiKey))
+          as Map<String, dynamic>;
+
+  Future<List<dynamic>> reconcile({required String apiKey}) async =>
+      (await _adminGet('/admin/reconcile', apiKey)) as List<dynamic>;
+
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
@@ -101,6 +134,23 @@ class ApiClient {
     final response = await _client.post(
       Uri.parse('$_base$path'),
       headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    return _decode(response);
+  }
+
+  Future<dynamic> _adminGet(String path, String apiKey) async {
+    final response = await _client.get(
+      Uri.parse('$_base$path'),
+      headers: {'X-API-Key': apiKey},
+    );
+    return _decode(response);
+  }
+
+  Future<dynamic> _adminPost(String path, Map<String, dynamic> body, String apiKey) async {
+    final response = await _client.post(
+      Uri.parse('$_base$path'),
+      headers: {'Content-Type': 'application/json', 'X-API-Key': apiKey},
       body: jsonEncode(body),
     );
     return _decode(response);

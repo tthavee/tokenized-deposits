@@ -8,6 +8,7 @@ class TransactionEntry {
     required this.status,
     required this.createdAt,
     this.onChainTxHash,
+    this.contractAddress,
   });
 
   final String id;
@@ -18,6 +19,7 @@ class TransactionEntry {
   final String status;
   final String createdAt;
   final String? onChainTxHash;
+  final String? contractAddress;
 
   factory TransactionEntry.fromJson(Map<String, dynamic> json) =>
       TransactionEntry(
@@ -29,5 +31,6 @@ class TransactionEntry {
         status: json['status'] as String,
         createdAt: json['created_at'] as String,
         onChainTxHash: json['on_chain_tx_hash'] as String?,
+        contractAddress: json['contract_address'] as String?,
       );
 }

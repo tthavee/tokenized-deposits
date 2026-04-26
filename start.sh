@@ -15,9 +15,11 @@ FRONTEND="$ROOT/frontend"
 
 DEPLOY=true
 SEPOLIA=false
+REDEPLOY=false
 for arg in "$@"; do
   [[ "$arg" == "--no-deploy" ]] && DEPLOY=false
   [[ "$arg" == "--sepolia" ]]   && SEPOLIA=true
+  [[ "$arg" == "--redeploy" ]]  && REDEPLOY=true
 done
 
 # ── colours ──────────────────────────────────────────────────────────────────
@@ -30,7 +32,7 @@ die()  { echo -e "${RED}[start] ERROR:${NC} $*" >&2; exit 1; }
 PIDS=()
 cleanup() {
   log "Shutting down..."
-  for pid in "${PIDS[@]}"; do
+  for pid in "${PIDS[@]:-}"; do
     kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
@@ -41,7 +43,7 @@ trap cleanup EXIT INT TERM
 if ! $SEPOLIA; then
   log "Starting Hardhat local node..."
   # Kill anything already holding port 8545 (e.g. a leftover from a previous run)
-  fuser -k 8545/tcp > /dev/null 2>&1 || true
+  lsof -ti :8545 | xargs kill -9 2>/dev/null || true
   cd "$BLOCKCHAIN"
   npm run node > "$ROOT/logs/hardhat.log" 2>&1 &
   HARDHAT_PID=$!
@@ -67,11 +69,16 @@ fi
 # ── 2. Deploy contracts ───────────────────────────────────────────────────────
 cd "$BLOCKCHAIN"
 if $SEPOLIA && $DEPLOY; then
-  log "Deploying contracts to Sepolia testnet..."
-  ASSET_TYPE=USD NETWORK_LABEL=sepolia npx hardhat run scripts/deploy.ts --network sepolia \
-    >> "$ROOT/logs/hardhat.log" 2>&1 \
-    || die "Sepolia deployment failed. Check logs/hardhat.log"
-  log "Contracts deployed to Sepolia."
+  DEPLOY_JSON="$BLOCKCHAIN/deployment-USD-sepolia.json"
+  if [[ -f "$DEPLOY_JSON" ]] && ! $REDEPLOY; then
+    log "Sepolia contract already deployed — skipping (use --redeploy to force)."
+  else
+    log "Deploying contracts to Sepolia testnet..."
+    ASSET_TYPE=USD NETWORK_LABEL=sepolia npx hardhat run scripts/deploy.ts --network sepolia \
+      >> "$ROOT/logs/hardhat.log" 2>&1 \
+      || die "Sepolia deployment failed. Check logs/hardhat.log"
+    log "Contracts deployed to Sepolia."
+  fi
 elif $DEPLOY; then
   log "Deploying contracts to local network..."
   npm run deploy:local >> "$ROOT/logs/hardhat.log" 2>&1 \

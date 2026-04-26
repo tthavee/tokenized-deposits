@@ -27,6 +27,9 @@ POLL_INTERVAL = 3
 # Maximum Firestore write attempts per event record.
 MAX_RETRIES = 3
 
+# Maximum block range per eth_getLogs call (public nodes cap at 50 000).
+MAX_BLOCK_RANGE = 2_000
+
 # keccak256 topic hashes for the custom events emitted by DepositToken.sol.
 # Mint(address indexed recipient, uint256 amount)
 MINT_TOPIC: str = Web3.keccak(text="Mint(address,uint256)").hex()
@@ -105,17 +108,20 @@ def _poll_network(
     if last_block >= latest_block:
         return  # Nothing new.
 
-    from_block = last_block + 1 if last_block > 0 else 0
+    # On first run (cursor == 0) skip historical data and start from now.
+    from_block = last_block + 1 if last_block > 0 else latest_block
+    to_block = min(from_block + MAX_BLOCK_RANGE - 1, latest_block)
 
     addresses = [Web3.to_checksum_address(a) for a in contracts]
     logs = w3.eth.get_logs(
         {
             "fromBlock": from_block,
-            "toBlock": latest_block,
+            "toBlock": to_block,
             "address": addresses,
             "topics": [[MINT_TOPIC, BURN_TOPIC]],
         }
     )
+    latest_block = to_block  # advance cursor only to what we fetched
 
     for log in logs:
         try:
@@ -182,6 +188,7 @@ def _process_log(
         "network": entry["network"],
         "status": "confirmed",
         "on_chain_tx_hash": tx_hash,
+        "contract_address": entry.get("contract_address"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 

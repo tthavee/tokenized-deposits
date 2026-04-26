@@ -1,4 +1,4 @@
-# Blockchain — Hardhat Project
+# Blockchain — Hardhat and Sepolia Project
 
 Local Ethereum development environment for the Tokenized Deposits POC.
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models/wallet.dart';
+import 'screens/admin_screen.dart';
 import 'screens/deposit_withdraw_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/kyc_screen.dart';
@@ -56,6 +57,7 @@ class TokenizedDepositsApp extends StatelessWidget {
         '/wallet': (_) => const WalletScreen(),
         '/deposit-withdraw': (_) => const DepositWithdrawScreen(),
         '/history': (_) => const HistoryScreen(),
+        '/admin': (_) => const AdminScreen(),
       },
     );
   }
@@ -110,6 +112,12 @@ class HomeScreen extends ConsumerWidget {
             icon: Icons.history,
             label: 'Transaction History',
             route: '/history',
+          ),
+          const Divider(),
+          const _NavTile(
+            icon: Icons.admin_panel_settings,
+            label: 'Admin',
+            route: '/admin',
           ),
         ],
       ),

@@ -52,6 +52,9 @@ class HistoryScreen extends ConsumerWidget {
   }
 }
 
+String _shortAddr(String addr) =>
+    addr.length > 12 ? '${addr.substring(0, 6)}…${addr.substring(addr.length - 4)}' : addr;
+
 class _TxTile extends StatelessWidget {
   const _TxTile({required this.tx});
 
@@ -69,7 +72,17 @@ class _TxTile extends StatelessWidget {
       title: Text(
         '${isDeposit ? 'Deposit' : 'Withdrawal'} — ${tx.assetType} (${tx.network})',
       ),
-      subtitle: Text(tx.createdAt.length > 10 ? tx.createdAt.substring(0, 10) : tx.createdAt),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(tx.createdAt.length > 10 ? tx.createdAt.substring(0, 10) : tx.createdAt),
+          if (tx.contractAddress != null)
+            Text(
+              _shortAddr(tx.contractAddress!),
+              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            ),
+        ],
+      ),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.end,

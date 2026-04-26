@@ -122,6 +122,9 @@ class DepositResponse(BaseModel):
     transaction_id: str
     status: str
     on_chain_tx_hash: Optional[str] = None
+    gas_used: Optional[int] = None
+    gas_price_gwei: Optional[float] = None
+    fee_eth: Optional[float] = None
 
 
 class WithdrawRequest(BaseModel):
@@ -134,6 +137,9 @@ class WithdrawResponse(BaseModel):
     transaction_id: str
     status: str
     on_chain_tx_hash: Optional[str] = None
+    gas_used: Optional[int] = None
+    gas_price_gwei: Optional[float] = None
+    fee_eth: Optional[float] = None
 
 
 class BalanceEntry(BaseModel):
@@ -141,6 +147,15 @@ class BalanceEntry(BaseModel):
     network: str
     chain_address: str
     balance: int
+    error: Optional[str] = None
+
+
+class GasEstimate(BaseModel):
+    network: str
+    base_fee_gwei: float
+    priority_fee_gwei: float
+    gas_limit: int
+    estimated_fee_eth: float
 
 
 class TransactionRecord(BaseModel):
@@ -151,6 +166,7 @@ class TransactionRecord(BaseModel):
     network: str
     status: str
     on_chain_tx_hash: Optional[str] = None
+    contract_address: Optional[str] = None
     created_at: str
 
 
@@ -243,6 +259,30 @@ def create_wallet(
     return WalletResponse(client_id=client_id, wallet=wallet)
 
 
+@router.get("/gas-estimate", response_model=GasEstimate)
+def gas_estimate(network: str = Query(...)):
+    """Return current gas price estimates for a mint/burn operation."""
+    rpc_url = RPC_URLS.get(network, "")
+    if not rpc_url:
+        raise HTTPException(status_code=404, detail=f"Unknown network: {network}")
+    try:
+        w3 = Web3(Web3.HTTPProvider(rpc_url))
+        latest = w3.eth.get_block("latest")
+        base_fee = latest.get("baseFeePerGas", 0)
+        priority_fee = w3.eth.max_priority_fee
+        gas_limit = 200_000
+        estimated_fee_eth = (base_fee + priority_fee) * gas_limit / 1e18
+        return GasEstimate(
+            network=network,
+            base_fee_gwei=base_fee / 1e9,
+            priority_fee_gwei=priority_fee / 1e9,
+            gas_limit=gas_limit,
+            estimated_fee_eth=estimated_fee_eth,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not fetch gas estimate: {exc}") from exc
+
+
 @router.post("/{client_id}/deposit", response_model=DepositResponse)
 def create_deposit(
     client_id: str,
@@ -293,6 +333,7 @@ def create_deposit(
             "network": body.network,
             "status": "pending",
             "on_chain_tx_hash": None,
+            "contract_address": contract_address,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -331,10 +372,18 @@ def create_deposit(
         db.collection("transactions").document(tx_id).update({"status": "failed"})
         raise HTTPException(status_code=502, detail=f"On-chain mint failed: {exc}") from exc
 
+    gas_used, gas_price_gwei, fee_eth = _extract_gas(w3, tx_hash)
     db.collection("transactions").document(tx_id).update(
         {"status": "confirmed", "on_chain_tx_hash": tx_hash}
     )
-    return DepositResponse(transaction_id=tx_id, status="confirmed", on_chain_tx_hash=tx_hash)
+    return DepositResponse(
+        transaction_id=tx_id,
+        status="confirmed",
+        on_chain_tx_hash=tx_hash,
+        gas_used=gas_used,
+        gas_price_gwei=gas_price_gwei,
+        fee_eth=fee_eth,
+    )
 
 
 @router.post("/{client_id}/withdraw", response_model=WithdrawResponse)
@@ -415,6 +464,7 @@ def create_withdrawal(
             "network": body.network,
             "status": "pending",
             "on_chain_tx_hash": None,
+            "contract_address": contract_address,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -438,10 +488,18 @@ def create_withdrawal(
         db.collection("transactions").document(tx_id).update({"status": "failed"})
         raise HTTPException(status_code=502, detail=f"On-chain burn failed: {exc}") from exc
 
+    gas_used, gas_price_gwei, fee_eth = _extract_gas(w3, tx_hash)
     db.collection("transactions").document(tx_id).update(
         {"status": "confirmed", "on_chain_tx_hash": tx_hash}
     )
-    return WithdrawResponse(transaction_id=tx_id, status="confirmed", on_chain_tx_hash=tx_hash)
+    return WithdrawResponse(
+        transaction_id=tx_id,
+        status="confirmed",
+        on_chain_tx_hash=tx_hash,
+        gas_used=gas_used,
+        gas_price_gwei=gas_price_gwei,
+        fee_eth=fee_eth,
+    )
 
 
 @router.get("/{client_id}/balance", response_model=BalanceEntry)
@@ -534,19 +592,25 @@ def get_balances(
             balance = contract.functions.balanceOf(
                 Web3.to_checksum_address(chain_address)
             ).call()
-        except Exception as exc:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Contract unreachable for {asset_type}/{network} — redeploy required: {exc}",
+            results.append(
+                BalanceEntry(
+                    asset_type=asset_type,
+                    network=network,
+                    chain_address=chain_address,
+                    balance=balance // 10**18,
+                )
             )
-        results.append(
-            BalanceEntry(
-                asset_type=asset_type,
-                network=network,
-                chain_address=chain_address,
-                balance=balance // 10**18,
+        except Exception:
+            error_msg = "Hardhat node isn't running" if network == "hardhat" else f"{network.capitalize()} node unreachable"
+            results.append(
+                BalanceEntry(
+                    asset_type=asset_type,
+                    network=network,
+                    chain_address=chain_address,
+                    balance=0,
+                    error=error_msg,
+                )
             )
-        )
 
     return results
 
@@ -566,8 +630,20 @@ def get_transactions(
 
 
 # ---------------------------------------------------------------------------
-# On-chain helper
+# On-chain helpers
 # ---------------------------------------------------------------------------
+
+def _extract_gas(w3: Web3, tx_hash: str) -> tuple[Optional[int], Optional[float], Optional[float]]:
+    """Wait for receipt and return (gas_used, gas_price_gwei, fee_eth). Returns Nones on timeout."""
+    try:
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=90)
+        gas_used: int = receipt["gasUsed"]
+        effective_gas_price: int = receipt.get("effectiveGasPrice", 0)
+        fee_eth = gas_used * effective_gas_price / 1e18
+        return gas_used, effective_gas_price / 1e9, fee_eth
+    except Exception:
+        return None, None, None
+
 
 def _register_on_chain(
     token_registry: dict[str, Any],
