@@ -6,6 +6,7 @@ import 'screens/admin_screen.dart';
 import 'screens/deposit_withdraw_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/kyc_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/wallet_screen.dart';
 import 'services/api_client.dart';
 import 'services/session_service.dart';
@@ -53,6 +54,7 @@ class TokenizedDepositsApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (_) => const HomeScreen(),
+        '/login': (_) => const LoginScreen(),
         '/kyc': (_) => const KycScreen(),
         '/wallet': (_) => const WalletScreen(),
         '/deposit-withdraw': (_) => const DepositWithdrawScreen(),
@@ -70,29 +72,34 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final clientId = ref.watch(currentClientIdProvider);
 
+    if (clientId == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.of(context).pushReplacementNamed('/login');
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('Tokenized Deposits')),
       body: ListView(
         children: [
-          if (clientId != null) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text(
-                'Signed in as $clientId',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Text(
+              'Signed in as $clientId',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Clear session'),
-              onTap: () async {
-                await SessionService.clear();
-                ref.read(currentClientIdProvider.notifier).state = null;
-                ref.read(currentWalletProvider.notifier).state = null;
-              },
-            ),
-            const Divider(),
-          ],
+          ),
+          ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Sign out'),
+            onTap: () async {
+              await SessionService.clear();
+              ref.read(currentClientIdProvider.notifier).state = null;
+              ref.read(currentWalletProvider.notifier).state = null;
+            },
+          ),
+          const Divider(),
           const _NavTile(
             icon: Icons.verified_user,
             label: 'KYC Verification',

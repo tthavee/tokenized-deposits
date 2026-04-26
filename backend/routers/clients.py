@@ -170,9 +170,52 @@ class TransactionRecord(BaseModel):
     created_at: str
 
 
+class ClientSummary(BaseModel):
+    id: str
+    first_name: str
+    last_name: str
+
+
+class LoginRequest(BaseModel):
+    client_id: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    client_id: str
+    wallet: Optional[dict[str, str]] = None
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.get("", response_model=list[ClientSummary])
+def list_clients(db=Depends(_db)):
+    """Return all clients with id, first_name, last_name."""
+    docs = db.collection("clients").stream()
+    return [
+        ClientSummary(
+            id=d.to_dict()["id"],
+            first_name=d.to_dict()["first_name"],
+            last_name=d.to_dict()["last_name"],
+        )
+        for d in docs
+    ]
+
+
+@router.post("/login", response_model=LoginResponse)
+def login(body: LoginRequest, db=Depends(_db)):
+    """Authenticate a client by client_id and password."""
+    doc = db.collection("clients").document(body.client_id).get()
+    if not doc.exists:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    data = doc.to_dict()
+    if data.get("password") != body.password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    wallet: Optional[dict[str, str]] = data.get("wallet")
+    return LoginResponse(client_id=body.client_id, wallet=wallet)
+
 
 @router.post("", response_model=ClientResponse, status_code=201)
 def create_client(body: ClientCreate, db=Depends(_db)):

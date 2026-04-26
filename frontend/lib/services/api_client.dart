@@ -13,6 +13,20 @@ class ApiClient {
   // Clients / KYC
   // -------------------------------------------------------------------------
 
+  Future<List<dynamic>> listClients() async {
+    final data = await _get('/clients');
+    return data as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> login({
+    required String clientId,
+    required String password,
+  }) async =>
+      (await _post('/clients/login', {
+        'client_id': clientId,
+        'password': password,
+      })) as Map<String, dynamic>;
+
   Future<Map<String, dynamic>> createClient({
     required String firstName,
     required String lastName,
