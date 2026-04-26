@@ -95,6 +95,28 @@ class _DepositWithdrawScreenState
         .toList()
       ..sort();
 
+    // Auto-select defaults when balances first arrive.
+    ref.listen<AsyncValue<List<BalanceEntry>>>(balancesProvider(clientId), (_, next) {
+      if (_selectedAssetType != null) return;
+      final loaded = next.valueOrNull;
+      if (loaded == null || loaded.isEmpty) return;
+      final availableAssets = loaded.map((b) => b.assetType).toSet();
+      final defaultAsset =
+          availableAssets.contains('USDD') ? 'USDD' : availableAssets.first;
+      final availableNetworks = loaded
+          .where((b) => b.assetType == defaultAsset)
+          .map((b) => b.network)
+          .toSet();
+      final defaultNetwork = availableNetworks.contains('sepolia')
+          ? 'sepolia'
+          : availableNetworks.first;
+      setState(() {
+        _selectedAssetType = defaultAsset;
+        _selectedNetwork = defaultNetwork;
+      });
+      _fetchGasEstimate(defaultNetwork);
+    });
+
     ref.listen<TxState>(txProvider, (_, next) {
       switch (next) {
         case TxSuccess(:final transactionId, :final gasUsed, :final gasPriceGwei, :final feeEth):
@@ -175,13 +197,15 @@ class _DepositWithdrawScreenState
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    key: const Key('assetTypeField'),
+                    key: ValueKey('assetTypeField_$_selectedAssetType'),
                     decoration: const InputDecoration(labelText: 'Asset type'),
                     initialValue: _selectedAssetType,
                     hint: const Text('Select asset type'),
                     items: assetTypes
-                        .map((t) =>
-                            DropdownMenuItem(value: t, child: Text(t)))
+                        .map((t) => DropdownMenuItem(
+                              value: t,
+                              child: Text(t),
+                            ))
                         .toList(),
                     onChanged: (v) => setState(() {
                       _selectedAssetType = v;
