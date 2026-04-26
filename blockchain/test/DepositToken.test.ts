@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { DepositToken, DepositToken__factory } from "../typechain-types";
+import { ethers, upgrades } from "hardhat";
+import { DepositToken } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import * as fc from "fast-check";
 
@@ -8,11 +8,15 @@ import * as fc from "fast-check";
 // Helpers
 // ---------------------------------------------------------------------------
 async function deploy(assetType: string, networkLabel: string): Promise<DepositToken> {
-  const [signer] = await ethers.getSigners();
-  const Factory = new DepositToken__factory(signer);
-  const contract = await Factory.deploy(assetType, networkLabel);
-  await contract.waitForDeployment();
-  return contract;
+  const [owner] = await ethers.getSigners();
+  const Factory = await ethers.getContractFactory("DepositToken");
+  const proxy = await upgrades.deployProxy(
+    Factory,
+    [assetType, networkLabel, owner.address],
+    { kind: "uups" }
+  );
+  await proxy.waitForDeployment();
+  return proxy as unknown as DepositToken;
 }
 
 // ---------------------------------------------------------------------------
@@ -54,10 +58,23 @@ describe("DepositToken — unit tests", () => {
       expect(await usd.isApproved(user.address)).to.be.true;
     });
 
+    it("emits WalletRegistered event", async () => {
+      await expect(usd.registerWallet(user.address))
+        .to.emit(usd, "WalletRegistered")
+        .withArgs(user.address);
+    });
+
     it("revokes a wallet and isApproved returns false", async () => {
       await usd.registerWallet(user.address);
       await usd.revokeWallet(user.address);
       expect(await usd.isApproved(user.address)).to.be.false;
+    });
+
+    it("emits WalletRevoked event", async () => {
+      await usd.registerWallet(user.address);
+      await expect(usd.revokeWallet(user.address))
+        .to.emit(usd, "WalletRevoked")
+        .withArgs(user.address);
     });
 
     it("reverts registerWallet from non-owner", async () => {

@@ -13,6 +13,7 @@ each poll cycle it:
 """
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,8 +22,13 @@ from web3 import Web3
 
 from services.wallet import RPC_URLS
 
+log = logging.getLogger("event_listener")
+
 # Seconds between poll cycles.
-POLL_INTERVAL = 3
+POLL_INTERVAL = 30
+
+# Reload token registry from Firestore every N poll cycles (not every cycle).
+REGISTRY_RELOAD_INTERVAL = 10
 
 # Maximum Firestore write attempts per event record.
 MAX_RETRIES = 3
@@ -43,14 +49,16 @@ BURN_TOPIC: str = Web3.keccak(text="Burn(address,uint256)").hex()
 
 async def run_event_listener(app_state) -> None:
     """Async background task: poll every POLL_INTERVAL seconds."""
-    print("[event_listener] started")
-    # One persistent Web3 instance per network — never recreated between polls.
+    log.info("started (poll interval: %ds, registry reload every %d cycles)",
+             POLL_INTERVAL, REGISTRY_RELOAD_INTERVAL)
     w3_cache: dict[str, Web3] = {}
+    cycle = 0
     while True:
         try:
-            _run_once(app_state, w3_cache)
-        except Exception as exc:
-            print(f"[event_listener] unexpected error: {exc}")
+            _run_once(app_state, w3_cache, reload_registry=(cycle % REGISTRY_RELOAD_INTERVAL == 0))
+        except Exception:
+            log.exception("unexpected error in poll cycle %d", cycle)
+        cycle += 1
         await asyncio.sleep(POLL_INTERVAL)
 
 
@@ -58,12 +66,14 @@ async def run_event_listener(app_state) -> None:
 # Single poll cycle
 # ---------------------------------------------------------------------------
 
-def _run_once(app_state, w3_cache: dict[str, Web3]) -> None:
+def _run_once(app_state, w3_cache: dict[str, Web3], reload_registry: bool = False) -> None:
     db: firestore.Client = app_state.db
 
-    # Refresh registry so newly deployed contracts are picked up automatically.
-    registry = _load_token_registry(db)
-    app_state.token_registry = registry
+    # Reload registry from Firestore periodically, not every cycle.
+    if reload_registry:
+        log.info("reloading token registry from Firestore")
+        app_state.token_registry = _load_token_registry(db)
+    registry = app_state.token_registry
 
     # Group contracts by network: network -> {lowercase_address -> registry entry}
     by_network: dict[str, dict[str, Any]] = {}
@@ -81,8 +91,8 @@ def _run_once(app_state, w3_cache: dict[str, Web3]) -> None:
             if network not in w3_cache:
                 w3_cache[network] = Web3(Web3.HTTPProvider(rpc_url))
             _poll_network(db, network, contracts, rpc_url, w3_cache[network])
-        except Exception as exc:
-            print(f"[event_listener] error polling {network}: {exc}")
+        except Exception:
+            log.exception("error polling %s", network)
 
 
 # ---------------------------------------------------------------------------
@@ -123,21 +133,18 @@ def _poll_network(
     )
     latest_block = to_block  # advance cursor only to what we fetched
 
-    for log in logs:
+    for entry in logs:
         try:
-            _process_log(db, log, contracts)
-        except Exception as exc:
-            tx = log.get("transactionHash", b"").hex()
-            print(f"[event_listener] failed to process log {tx}: {exc}")
+            _process_log(db, entry, contracts)
+        except Exception:
+            tx = entry.get("transactionHash", b"").hex()
+            log.exception("failed to process log tx=%s on %s", tx, network)
 
     # Advance the cursor only after all events in this range are processed.
     db.collection("system").document("event_listener").set(
         {cursor_key: latest_block}, merge=True
     )
-    print(
-        f"[event_listener] {network}: processed blocks {from_block}→{latest_block}"
-        f", {len(logs)} event(s)"
-    )
+    log.info("%s: blocks %d→%d, %d event(s)", network, from_block, latest_block, len(logs))
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +230,7 @@ def _write_with_retry(db: firestore.Client, tx_hash: str, record: dict) -> None:
             return
         except Exception as exc:
             last_exc = exc
-            print(
-                f"[event_listener] Firestore write attempt {attempt}/{MAX_RETRIES}"
-                f" failed for {tx_hash}: {exc}"
-            )
-    print(f"[event_listener] permanent Firestore failure for {tx_hash}: {last_exc}")
+            log.warning("Firestore write attempt %d/%d failed for tx=%s: %s",
+                        attempt, MAX_RETRIES, tx_hash, exc)
+    log.error("permanent Firestore failure for tx=%s after %d attempts: %s",
+              tx_hash, MAX_RETRIES, last_exc)

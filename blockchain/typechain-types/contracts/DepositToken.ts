@@ -26,12 +26,14 @@ import type {
 export interface DepositTokenInterface extends Interface {
   getFunction(
     nameOrSignature:
+      | "UPGRADE_INTERFACE_VERSION"
       | "allowance"
       | "approve"
       | "assetType"
       | "balanceOf"
       | "burn"
       | "decimals"
+      | "initialize"
       | "isApproved"
       | "mint"
       | "name"
@@ -39,6 +41,7 @@ export interface DepositTokenInterface extends Interface {
       | "owner"
       | "pause"
       | "paused"
+      | "proxiableUUID"
       | "registerWallet"
       | "renounceOwnership"
       | "revokeWallet"
@@ -48,19 +51,28 @@ export interface DepositTokenInterface extends Interface {
       | "transferFrom"
       | "transferOwnership"
       | "unpause"
+      | "upgradeToAndCall"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
       | "Approval"
       | "Burn"
+      | "Initialized"
       | "Mint"
       | "OwnershipTransferred"
       | "Paused"
       | "Transfer"
       | "Unpaused"
+      | "Upgraded"
+      | "WalletRegistered"
+      | "WalletRevoked"
   ): EventFragment;
 
+  encodeFunctionData(
+    functionFragment: "UPGRADE_INTERFACE_VERSION",
+    values?: undefined
+  ): string;
   encodeFunctionData(
     functionFragment: "allowance",
     values: [AddressLike, AddressLike]
@@ -80,6 +92,10 @@ export interface DepositTokenInterface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "decimals", values?: undefined): string;
   encodeFunctionData(
+    functionFragment: "initialize",
+    values: [string, string, AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "isApproved",
     values: [AddressLike]
   ): string;
@@ -95,6 +111,10 @@ export interface DepositTokenInterface extends Interface {
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(functionFragment: "pause", values?: undefined): string;
   encodeFunctionData(functionFragment: "paused", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "proxiableUUID",
+    values?: undefined
+  ): string;
   encodeFunctionData(
     functionFragment: "registerWallet",
     values: [AddressLike]
@@ -125,13 +145,22 @@ export interface DepositTokenInterface extends Interface {
     values: [AddressLike]
   ): string;
   encodeFunctionData(functionFragment: "unpause", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "upgradeToAndCall",
+    values: [AddressLike, BytesLike]
+  ): string;
 
+  decodeFunctionResult(
+    functionFragment: "UPGRADE_INTERFACE_VERSION",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(functionFragment: "allowance", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "approve", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "assetType", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "burn", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "decimals", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "initialize", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "isApproved", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "mint", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "name", data: BytesLike): Result;
@@ -142,6 +171,10 @@ export interface DepositTokenInterface extends Interface {
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "pause", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "paused", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "proxiableUUID",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "registerWallet",
     data: BytesLike
@@ -169,6 +202,10 @@ export interface DepositTokenInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "unpause", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "upgradeToAndCall",
+    data: BytesLike
+  ): Result;
 }
 
 export namespace ApprovalEvent {
@@ -195,6 +232,18 @@ export namespace BurnEvent {
   export interface OutputObject {
     source: string;
     amount: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace InitializedEvent {
+  export type InputTuple = [version: BigNumberish];
+  export type OutputTuple = [version: bigint];
+  export interface OutputObject {
+    version: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -270,6 +319,42 @@ export namespace UnpausedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace UpgradedEvent {
+  export type InputTuple = [implementation: AddressLike];
+  export type OutputTuple = [implementation: string];
+  export interface OutputObject {
+    implementation: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace WalletRegisteredEvent {
+  export type InputTuple = [wallet: AddressLike];
+  export type OutputTuple = [wallet: string];
+  export interface OutputObject {
+    wallet: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace WalletRevokedEvent {
+  export type InputTuple = [wallet: AddressLike];
+  export type OutputTuple = [wallet: string];
+  export interface OutputObject {
+    wallet: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export interface DepositToken extends BaseContract {
   connect(runner?: ContractRunner | null): DepositToken;
   waitForDeployment(): Promise<this>;
@@ -313,6 +398,8 @@ export interface DepositToken extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  UPGRADE_INTERFACE_VERSION: TypedContractMethod<[], [string], "view">;
+
   allowance: TypedContractMethod<
     [owner: AddressLike, spender: AddressLike],
     [bigint],
@@ -337,6 +424,12 @@ export interface DepositToken extends BaseContract {
 
   decimals: TypedContractMethod<[], [bigint], "view">;
 
+  initialize: TypedContractMethod<
+    [_assetType: string, _networkLabel: string, _owner: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
   isApproved: TypedContractMethod<[wallet: AddressLike], [boolean], "view">;
 
   mint: TypedContractMethod<
@@ -354,6 +447,8 @@ export interface DepositToken extends BaseContract {
   pause: TypedContractMethod<[], [void], "nonpayable">;
 
   paused: TypedContractMethod<[], [boolean], "view">;
+
+  proxiableUUID: TypedContractMethod<[], [string], "view">;
 
   registerWallet: TypedContractMethod<
     [wallet: AddressLike],
@@ -393,10 +488,19 @@ export interface DepositToken extends BaseContract {
 
   unpause: TypedContractMethod<[], [void], "nonpayable">;
 
+  upgradeToAndCall: TypedContractMethod<
+    [newImplementation: AddressLike, data: BytesLike],
+    [void],
+    "payable"
+  >;
+
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
 
+  getFunction(
+    nameOrSignature: "UPGRADE_INTERFACE_VERSION"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "allowance"
   ): TypedContractMethod<
@@ -428,6 +532,13 @@ export interface DepositToken extends BaseContract {
     nameOrSignature: "decimals"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
+    nameOrSignature: "initialize"
+  ): TypedContractMethod<
+    [_assetType: string, _networkLabel: string, _owner: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "isApproved"
   ): TypedContractMethod<[wallet: AddressLike], [boolean], "view">;
   getFunction(
@@ -452,6 +563,9 @@ export interface DepositToken extends BaseContract {
   getFunction(
     nameOrSignature: "paused"
   ): TypedContractMethod<[], [boolean], "view">;
+  getFunction(
+    nameOrSignature: "proxiableUUID"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "registerWallet"
   ): TypedContractMethod<[wallet: AddressLike], [void], "nonpayable">;
@@ -487,6 +601,13 @@ export interface DepositToken extends BaseContract {
   getFunction(
     nameOrSignature: "unpause"
   ): TypedContractMethod<[], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "upgradeToAndCall"
+  ): TypedContractMethod<
+    [newImplementation: AddressLike, data: BytesLike],
+    [void],
+    "payable"
+  >;
 
   getEvent(
     key: "Approval"
@@ -501,6 +622,13 @@ export interface DepositToken extends BaseContract {
     BurnEvent.InputTuple,
     BurnEvent.OutputTuple,
     BurnEvent.OutputObject
+  >;
+  getEvent(
+    key: "Initialized"
+  ): TypedContractEvent<
+    InitializedEvent.InputTuple,
+    InitializedEvent.OutputTuple,
+    InitializedEvent.OutputObject
   >;
   getEvent(
     key: "Mint"
@@ -537,6 +665,27 @@ export interface DepositToken extends BaseContract {
     UnpausedEvent.OutputTuple,
     UnpausedEvent.OutputObject
   >;
+  getEvent(
+    key: "Upgraded"
+  ): TypedContractEvent<
+    UpgradedEvent.InputTuple,
+    UpgradedEvent.OutputTuple,
+    UpgradedEvent.OutputObject
+  >;
+  getEvent(
+    key: "WalletRegistered"
+  ): TypedContractEvent<
+    WalletRegisteredEvent.InputTuple,
+    WalletRegisteredEvent.OutputTuple,
+    WalletRegisteredEvent.OutputObject
+  >;
+  getEvent(
+    key: "WalletRevoked"
+  ): TypedContractEvent<
+    WalletRevokedEvent.InputTuple,
+    WalletRevokedEvent.OutputTuple,
+    WalletRevokedEvent.OutputObject
+  >;
 
   filters: {
     "Approval(address,address,uint256)": TypedContractEvent<
@@ -559,6 +708,17 @@ export interface DepositToken extends BaseContract {
       BurnEvent.InputTuple,
       BurnEvent.OutputTuple,
       BurnEvent.OutputObject
+    >;
+
+    "Initialized(uint64)": TypedContractEvent<
+      InitializedEvent.InputTuple,
+      InitializedEvent.OutputTuple,
+      InitializedEvent.OutputObject
+    >;
+    Initialized: TypedContractEvent<
+      InitializedEvent.InputTuple,
+      InitializedEvent.OutputTuple,
+      InitializedEvent.OutputObject
     >;
 
     "Mint(address,uint256)": TypedContractEvent<
@@ -614,6 +774,39 @@ export interface DepositToken extends BaseContract {
       UnpausedEvent.InputTuple,
       UnpausedEvent.OutputTuple,
       UnpausedEvent.OutputObject
+    >;
+
+    "Upgraded(address)": TypedContractEvent<
+      UpgradedEvent.InputTuple,
+      UpgradedEvent.OutputTuple,
+      UpgradedEvent.OutputObject
+    >;
+    Upgraded: TypedContractEvent<
+      UpgradedEvent.InputTuple,
+      UpgradedEvent.OutputTuple,
+      UpgradedEvent.OutputObject
+    >;
+
+    "WalletRegistered(address)": TypedContractEvent<
+      WalletRegisteredEvent.InputTuple,
+      WalletRegisteredEvent.OutputTuple,
+      WalletRegisteredEvent.OutputObject
+    >;
+    WalletRegistered: TypedContractEvent<
+      WalletRegisteredEvent.InputTuple,
+      WalletRegisteredEvent.OutputTuple,
+      WalletRegisteredEvent.OutputObject
+    >;
+
+    "WalletRevoked(address)": TypedContractEvent<
+      WalletRevokedEvent.InputTuple,
+      WalletRevokedEvent.OutputTuple,
+      WalletRevokedEvent.OutputObject
+    >;
+    WalletRevoked: TypedContractEvent<
+      WalletRevokedEvent.InputTuple,
+      WalletRevokedEvent.OutputTuple,
+      WalletRevokedEvent.OutputObject
     >;
   };
 }

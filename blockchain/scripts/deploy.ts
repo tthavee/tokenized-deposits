@@ -1,4 +1,4 @@
-import { ethers, network } from "hardhat";
+import { ethers, network, upgrades } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import * as admin from "firebase-admin";
@@ -39,8 +39,6 @@ async function main(): Promise<void> {
   const [deployer] = await ethers.getSigners();
 
   const assetType = getFlag("--asset-type", process.env.ASSET_TYPE ?? "USD");
-  // Map Hardhat's internal "localhost" network name to "hardhat" so it matches
-  // the backend's RPC_URLS and SUPPORTED_NETWORKS keys.
   const defaultLabel = network.name === "localhost" ? "hardhat" : network.name;
   const networkLabel = getFlag("--network-label", process.env.NETWORK_LABEL ?? defaultLabel);
 
@@ -51,16 +49,23 @@ async function main(): Promise<void> {
   );
   console.log(`Asset type: ${assetType}  |  Network: ${networkLabel}`);
 
-  // Deploy
-  const ContractFactory = await ethers.getContractFactory("DepositToken");
-  const contract = await ContractFactory.deploy(assetType, networkLabel);
-  await contract.waitForDeployment();
+  // Deploy via UUPS proxy — proxy address is permanent, implementation can be upgraded.
+  const Factory = await ethers.getContractFactory("DepositToken");
+  const proxy = await upgrades.deployProxy(
+    Factory,
+    [assetType, networkLabel, deployer.address],
+    { kind: "uups" }
+  );
+  await proxy.waitForDeployment();
 
-  const contractAddress = await contract.getAddress();
+  const proxyAddress = await proxy.getAddress();
+  const implementationAddress = await upgrades.erc1967.getImplementationAddress(proxyAddress);
   const deployedAt = new Date().toISOString();
-  console.log("DepositToken deployed to:", contractAddress);
 
-  // Load ABI
+  console.log("Proxy (permanent address):", proxyAddress);
+  console.log("Implementation:           ", implementationAddress);
+
+  // Load ABI from the implementation artifact
   const artifactPath = path.join(
     __dirname,
     "../artifacts/contracts/DepositToken.sol/DepositToken.json"
@@ -69,7 +74,9 @@ async function main(): Promise<void> {
 
   // Save deployment-{asset_type}-{network}.json
   const deploymentInfo = {
-    contractAddress,
+    contractAddress: proxyAddress,        // proxy — use this everywhere
+    proxyAddress,
+    implementationAddress,
     assetType,
     networkLabel,
     deployer: deployer.address,
@@ -89,7 +96,9 @@ async function main(): Promise<void> {
   if (db) {
     const docId = `${assetType}_${networkLabel}`;
     await db.collection("token_registry").doc(docId).set({
-      contract_address: contractAddress,
+      contract_address: proxyAddress,
+      proxy_address: proxyAddress,
+      implementation_address: implementationAddress,
       asset_type: assetType,
       network: networkLabel,
       deployed_at: deployedAt,

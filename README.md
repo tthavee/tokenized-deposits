@@ -86,22 +86,86 @@ npx hardhat verify --network sepolia <CONTRACT_ADDRESS>
 
 Get free Sepolia ETH from [sepoliafaucet.com](https://sepoliafaucet.com).
 
+## Upgrading the Smart Contract
+
+The contract is deployed behind a UUPS proxy — the proxy address (and all stored balances) never changes when you upgrade the logic.
+
+```bash
+# After editing DepositToken.sol, run tests first
+cd blockchain
+npx hardhat test
+
+# Then upgrade the implementation on Sepolia (proxy address stays the same)
+npx hardhat run scripts/upgrade.ts --network sepolia
+
+# Or upgrade on local hardhat
+npx hardhat run scripts/upgrade.ts --network localhost
+```
+
+---
+
+## Event Listener
+
+The event listener watches the blockchain for `Mint` and `Burn` events and mirrors them into Firestore as transaction records. It is **not** started automatically with the backend — run it separately when you need on-chain sync.
+
+```bash
+cd backend
+venv/bin/python scripts/run_event_listener.py
+```
+
+Stop it with `Ctrl+C`.
+
+**When to run it:**
+- After a deposit or withdrawal to confirm the Firestore record was written
+- To catch any on-chain activity done outside the app (Etherscan, scripts)
+- During active testing sessions
+
+**What it does each cycle (every 30s):**
+1. Reads the last processed block cursor from Firestore per network
+2. Fetches `Mint`/`Burn` logs from the chain (up to 2,000 blocks at a time)
+3. Writes any new events to Firestore as transaction records (idempotent)
+4. Advances the block cursor
+
+> **Note:** The token registry is reloaded from Firestore every 10 cycles (~5 min) rather than every poll to stay within Firestore's free-tier read quota.
+
+---
+
 ## Project Structure
 
 ```
 blockchain/
-├── contracts/       # Solidity contracts (DepositToken.sol — issue #5)
+├── contracts/
+│   └── DepositToken.sol   # UUPS-upgradeable ERC-20 deposit token
 ├── scripts/
-│   └── deploy.ts    # Deployment script — saves deployment.json for backend
-├── test/            # Hardhat + Chai + fast-check tests (issue #17)
+│   ├── deploy.ts           # First-time deployment via UUPS proxy
+│   └── upgrade.ts          # Upgrade implementation behind existing proxy
+├── test/                   # Hardhat + Chai + fast-check tests
 ├── hardhat.config.ts
-├── tsconfig.json
 └── package.json
+
+backend/
+├── routers/
+│   ├── clients.py          # KYC, wallet, deposit, withdraw, balance endpoints
+│   └── admin.py            # Pause/unpause, register-wallets, reconcile endpoints
+├── services/
+│   ├── event_listener.py   # On-chain event → Firestore sync logic
+│   ├── kyc.py
+│   └── wallet.py
+├── scripts/
+│   └── run_event_listener.py  # Standalone event listener entrypoint
+└── main.py                 # FastAPI app
+
+frontend/
+├── lib/
+│   ├── screens/            # KYC, Wallet, Deposit/Withdraw, History, Admin screens
+│   ├── providers/          # Riverpod state providers
+│   ├── models/             # BalanceEntry, TransactionEntry, etc.
+│   └── services/           # ApiClient HTTP wrapper
+└── pubspec.yaml
 ```
 
 ## Network
 
 - Local node: `http://127.0.0.1:8545`
 - Chain ID: `31337`
-- The deployment script writes `deployment.json` with the contract address and ABI,
-  which the Python backend reads at startup.
+- The deployment script writes `deployment-{asset}-{network}.json` with the proxy address and ABI, which the Python backend reads at startup.

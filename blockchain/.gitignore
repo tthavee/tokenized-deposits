@@ -5,3 +5,5 @@ deployment.json
 deployment-*.json
 .hardhat-state.json
 .env
+# OZ upgrades manifest for local hardhat only (resets on every node restart — not meaningful to track)
+.openzeppelin/unknown-31337.json
