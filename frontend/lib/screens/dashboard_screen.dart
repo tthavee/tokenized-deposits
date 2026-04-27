@@ -361,7 +361,7 @@ class _BalanceCard extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _EtherscanLink(
-                    label: 'My Wallet',
+                    label: 'My Wallet (Sepolia)',
                     url:
                         'https://sepolia.etherscan.io/token/${entry.contractAddress}?a=${entry.chainAddress}',
                     icon: Icons.person_search,
