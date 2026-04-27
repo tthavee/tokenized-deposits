@@ -18,11 +18,17 @@ class _DepositWithdrawScreenState
     extends ConsumerState<DepositWithdrawScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountCtrl = TextEditingController();
-  String? _selectedAssetType;
-  String? _selectedNetwork;
+  String? _selectedAssetType = 'USDD';
+  String? _selectedNetwork = 'sepolia';
   String _txType = 'deposit';
   Map<String, dynamic>? _gasEstimate;
   bool _gasLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fetchGasEstimate('sepolia'));
+  }
 
   @override
   void dispose() {

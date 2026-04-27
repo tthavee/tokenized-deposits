@@ -259,11 +259,11 @@ class _WalletCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (network == 'sepolia') ...[
+            if (network == 'sepolia-xxxx') ...[
               const SizedBox(height: 4),
               _EtherscanLink(
                 label: 'View wallet on Etherscan',
-                url: 'https://sepolia.etherscan.io/address/$address',
+                url: 'https://sepolia.etherscan.io/address/$address#tokentxns',
                 icon: Icons.open_in_new,
               ),
             ],
@@ -361,15 +361,15 @@ class _BalanceCard extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   _EtherscanLink(
-                    label: 'Holder page',
+                    label: 'My Wallet',
                     url:
                         'https://sepolia.etherscan.io/token/${entry.contractAddress}?a=${entry.chainAddress}',
                     icon: Icons.person_search,
                   ),
                   _EtherscanLink(
-                    label: 'Smart contract',
+                    label: 'All wallets',
                     url:
-                        'https://sepolia.etherscan.io/address/${entry.contractAddress}',
+                        'https://sepolia.etherscan.io/token/${entry.contractAddress}#balances',
                     icon: Icons.description,
                   ),
                 ],
