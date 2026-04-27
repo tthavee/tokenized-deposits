@@ -32,12 +32,14 @@ class ApiClient {
     required String lastName,
     required String dateOfBirth,
     required String nationalId,
+    required String password,
   }) async =>
       (await _post('/clients', {
         'first_name': firstName,
         'last_name': lastName,
         'date_of_birth': dateOfBirth,
         'national_id': nationalId,
+        'password': password,
       })) as Map<String, dynamic>;
 
   // -------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models/wallet.dart';
 import 'screens/admin_screen.dart';
+import 'screens/dashboard_screen.dart';
 import 'screens/deposit_withdraw_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/kyc_screen.dart';
@@ -53,7 +54,8 @@ class TokenizedDepositsApp extends StatelessWidget {
       ),
       initialRoute: '/',
       routes: {
-        '/': (_) => const HomeScreen(),
+        '/': (_) => const DashboardScreen(),
+        '/menu': (_) => const HomeScreen(),
         '/login': (_) => const LoginScreen(),
         '/kyc': (_) => const KycScreen(),
         '/wallet': (_) => const WalletScreen(),
@@ -80,7 +82,7 @@ class HomeScreen extends ConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Tokenized Deposits')),
+      appBar: AppBar(title: const Text('Menu')),
       body: ListView(
         children: [
           Padding(
@@ -97,12 +99,20 @@ class HomeScreen extends ConsumerWidget {
               await SessionService.clear();
               ref.read(currentClientIdProvider.notifier).state = null;
               ref.read(currentWalletProvider.notifier).state = null;
+              if (context.mounted) {
+                Navigator.of(context).pushReplacementNamed('/login');
+              }
             },
           ),
           const Divider(),
           const _NavTile(
+            icon: Icons.dashboard,
+            label: 'Dashboard',
+            route: '/',
+          ),
+          const _NavTile(
             icon: Icons.verified_user,
-            label: 'KYC Verification',
+            label: 'New Wallet & KYC',
             route: '/kyc',
           ),
           const _NavTile(

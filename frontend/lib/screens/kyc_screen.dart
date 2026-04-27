@@ -18,6 +18,7 @@ class _KycScreenState extends ConsumerState<KycScreen> {
   final _lastNameCtrl = TextEditingController();
   final _dobCtrl = TextEditingController();
   final _nationalIdCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController(text: 'mufg');
 
   @override
   void dispose() {
@@ -25,6 +26,7 @@ class _KycScreenState extends ConsumerState<KycScreen> {
     _lastNameCtrl.dispose();
     _dobCtrl.dispose();
     _nationalIdCtrl.dispose();
+    _passwordCtrl.dispose();
     super.dispose();
   }
 
@@ -35,6 +37,7 @@ class _KycScreenState extends ConsumerState<KycScreen> {
           lastName: _lastNameCtrl.text.trim(),
           dateOfBirth: _dobCtrl.text.trim(),
           nationalId: _nationalIdCtrl.text.trim(),
+          password: _passwordCtrl.text.trim(),
         );
   }
 
@@ -48,10 +51,7 @@ class _KycScreenState extends ConsumerState<KycScreen> {
           ref.read(currentClientIdProvider.notifier).state = client.id;
           ref.read(currentWalletProvider.notifier).state = wallet;
           SessionService.save(client.id, wallet); // fire-and-forget
-          Navigator.of(context).pushReplacementNamed(
-            '/wallet',
-            arguments: wallet,
-          );
+          Navigator.of(context).pushReplacementNamed('/');
           ref.read(kycProvider.notifier).reset();
         case KycError(:final message):
           ScaffoldMessenger.of(context).showSnackBar(
@@ -67,7 +67,7 @@ class _KycScreenState extends ConsumerState<KycScreen> {
     });
 
     return Scaffold(
-      appBar: AppBar(title: const Text('KYC Verification')),
+      appBar: AppBar(title: const Text('New Wallet & KYC')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Form(
@@ -114,6 +114,15 @@ class _KycScreenState extends ConsumerState<KycScreen> {
                 key: const Key('nationalIdField'),
                 controller: _nationalIdCtrl,
                 decoration: const InputDecoration(labelText: 'National ID'),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                key: const Key('passwordField'),
+                controller: _passwordCtrl,
+                decoration: const InputDecoration(labelText: 'Password'),
+                obscureText: true,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),

@@ -47,6 +47,7 @@ class KycNotifier extends StateNotifier<KycState> {
     required String lastName,
     required String dateOfBirth,
     required String nationalId,
+    required String password,
   }) async {
     state = const KycLoading();
     try {
@@ -55,6 +56,7 @@ class KycNotifier extends StateNotifier<KycState> {
         lastName: lastName,
         dateOfBirth: dateOfBirth,
         nationalId: nationalId,
+        password: password,
       );
       final client = Client.fromJson(clientJson);
 

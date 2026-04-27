@@ -1,7 +1,7 @@
 """
 Client endpoints:
 
-  POST /clients                    — KYC verification + client record creation
+  POST /clients                    — New Wallet & KYC + client record creation
   POST /clients/{id}/wallet        — wallet address generation + on-chain registration
   POST /clients/{id}/deposit       — mint Deposit_Tokens for a fiat deposit
   POST /clients/{id}/withdraw      — burn Deposit_Tokens for a fiat withdrawal
@@ -97,6 +97,7 @@ class ClientCreate(BaseModel):
     last_name: str
     date_of_birth: date
     national_id: str
+    password: str = "mufg"
 
 
 class ClientResponse(BaseModel):
@@ -148,6 +149,7 @@ class BalanceEntry(BaseModel):
     chain_address: str
     balance: int
     error: Optional[str] = None
+    contract_address: Optional[str] = None
 
 
 class GasEstimate(BaseModel):
@@ -236,6 +238,7 @@ def create_client(body: ClientCreate, db=Depends(_db)):
         "last_name": body.last_name,
         "date_of_birth": body.date_of_birth.isoformat(),
         "national_id": body.national_id,
+        "password": body.password,
         "kyc_status": "approved" if kyc_result.approved else "failed",
     }
     if not kyc_result.approved:
@@ -588,6 +591,7 @@ def get_balance(
         network=network,
         chain_address=chain_address,
         balance=balance,
+        contract_address=entry["contract_address"],
     )
 
 
@@ -618,6 +622,7 @@ def get_balances(
                     network=network,
                     chain_address=chain_address,
                     balance=0,
+                    contract_address=contract_address or None,
                 )
             )
             continue
@@ -641,6 +646,7 @@ def get_balances(
                     network=network,
                     chain_address=chain_address,
                     balance=balance // 10**18,
+                    contract_address=contract_address,
                 )
             )
         except Exception:
@@ -652,6 +658,7 @@ def get_balances(
                     chain_address=chain_address,
                     balance=0,
                     error=error_msg,
+                    contract_address=contract_address,
                 )
             )
 
