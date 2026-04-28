@@ -20,6 +20,7 @@ class _SuccessApiClient extends ApiClient {
     required String lastName,
     required String dateOfBirth,
     required String nationalId,
+    required String password,
   }) async =>
       {
         'id': 'client-1',
@@ -45,6 +46,7 @@ class _KycFailApiClient extends ApiClient {
     required String lastName,
     required String dateOfBirth,
     required String nationalId,
+    required String password,
   }) async =>
       throw const ApiException(422, 'Document number is invalid');
 
