@@ -11,9 +11,11 @@ from services.event_listener import (
     BURN_TOPIC,
     MAX_RETRIES,
     MINT_TOPIC,
+    TRANSFER_TOPIC,
     _find_client_id,
     _poll_network,
     _process_log,
+    _process_transfer_log,
     _run_once,
     _write_with_retry,
 )
@@ -373,7 +375,7 @@ class TestPollNetwork:
         call_args = w3.eth.get_logs.call_args[0][0]
         assert len(call_args["address"]) == 1
 
-    def test_filters_by_mint_and_burn_topics(self):
+    def test_filters_by_mint_burn_and_transfer_topics(self):
         db = _mock_db(last_block=0)
         w3 = _mock_w3(latest_block=10)
 
@@ -382,6 +384,7 @@ class TestPollNetwork:
         call_args = w3.eth.get_logs.call_args[0][0]
         assert MINT_TOPIC in call_args["topics"][0]
         assert BURN_TOPIC in call_args["topics"][0]
+        assert TRANSFER_TOPIC in call_args["topics"][0]
 
     def test_advances_cursor_after_successful_batch(self):
         db = _mock_db(last_block=50)
@@ -521,3 +524,149 @@ class TestRunOnce:
 
         assert "hardhat" in poll_calls
         assert "sepolia" in poll_calls
+
+
+# ---------------------------------------------------------------------------
+# _process_transfer_log
+# ---------------------------------------------------------------------------
+
+SENDER_ID = "sender-111"
+RECIPIENT_ID = "recipient-222"
+SENDER_ADDR = "0x" + "a" * 40
+RECIPIENT_ADDR = "0x" + "b" * 40
+ZERO_ADDR = "0x" + "0" * 40
+
+
+def _make_transfer_log(
+    from_addr: str = SENDER_ADDR,
+    to_addr: str = RECIPIENT_ADDR,
+    amount: int = AMOUNT,
+    tx_hash: str = TX_HASH,
+    contract: str = CONTRACT_ADDR,
+) -> dict:
+    topic0 = _HexBytes(bytes.fromhex(TRANSFER_TOPIC))
+    topic1 = _HexBytes(b"\x00" * 12 + bytes.fromhex(from_addr[2:]))
+    topic2 = _HexBytes(b"\x00" * 12 + bytes.fromhex(to_addr[2:]))
+    data = _HexBytes(amount.to_bytes(32, "big"))
+    tx = _HexBytes(bytes.fromhex(tx_hash))
+    return {
+        "address": contract,
+        "topics": [topic0, topic1, topic2],
+        "data": data,
+        "transactionHash": tx,
+    }
+
+
+def _mock_transfer_db(existing_tx: bool = False, missing: str | None = None):
+    """Return (db, tx_col) with sender and recipient clients wired up."""
+    db = MagicMock()
+    tx_col = MagicMock()
+    clients_col = MagicMock()
+
+    db.collection.side_effect = lambda name: (
+        tx_col if name == "transactions" else clients_col
+    )
+
+    tx_col.where.return_value.limit.return_value.get.return_value = (
+        [MagicMock()] if existing_tx else []
+    )
+
+    def _clients_where(field, op, value):
+        mock = MagicMock()
+        if missing == "sender" and value == SENDER_ADDR:
+            mock.limit.return_value.get.return_value = []
+        elif missing == "recipient" and value == RECIPIENT_ADDR:
+            mock.limit.return_value.get.return_value = []
+        elif value == SENDER_ADDR:
+            doc = MagicMock()
+            doc.to_dict.return_value = {"id": SENDER_ID}
+            mock.limit.return_value.get.return_value = [doc]
+        elif value == RECIPIENT_ADDR:
+            doc = MagicMock()
+            doc.to_dict.return_value = {"id": RECIPIENT_ID}
+            mock.limit.return_value.get.return_value = [doc]
+        else:
+            mock.limit.return_value.get.return_value = []
+        return mock
+
+    clients_col.where.side_effect = _clients_where
+    return db, tx_col
+
+
+class TestProcessTransferLog:
+    def _call(self, raw_log, db):
+        with patch(
+            "services.event_listener.Web3.to_checksum_address",
+            side_effect=lambda x: "0x" + x.hex() if isinstance(x, (bytes, bytearray)) else x,
+        ):
+            _process_transfer_log(db, raw_log, REGISTRY_ENTRY)
+
+    def test_writes_two_records_for_wallet_to_wallet_transfer(self):
+        db, tx_col = _mock_transfer_db()
+        self._call(_make_transfer_log(), db)
+        assert tx_col.document.return_value.set.call_count == 2
+
+    def test_sender_record_has_direction_sent(self):
+        db, tx_col = _mock_transfer_db()
+        self._call(_make_transfer_log(), db)
+        records = [c[0][0] for c in tx_col.document.return_value.set.call_args_list]
+        sent = [r for r in records if r.get("direction") == "sent"]
+        assert len(sent) == 1
+        assert sent[0]["client_id"] == SENDER_ID
+        assert sent[0]["counterparty_id"] == RECIPIENT_ID
+
+    def test_recipient_record_has_direction_received(self):
+        db, tx_col = _mock_transfer_db()
+        self._call(_make_transfer_log(), db)
+        records = [c[0][0] for c in tx_col.document.return_value.set.call_args_list]
+        received = [r for r in records if r.get("direction") == "received"]
+        assert len(received) == 1
+        assert received[0]["client_id"] == RECIPIENT_ID
+        assert received[0]["counterparty_id"] == SENDER_ID
+
+    def test_records_have_correct_amount_and_metadata(self):
+        db, tx_col = _mock_transfer_db()
+        self._call(_make_transfer_log(), db)
+        records = [c[0][0] for c in tx_col.document.return_value.set.call_args_list]
+        for r in records:
+            assert r["amount"] == AMOUNT
+            assert r["asset_type"] == ASSET_TYPE
+            assert r["network"] == NETWORK
+            assert r["status"] == "confirmed"
+            assert r["on_chain_tx_hash"] == TX_HASH
+
+    def test_skips_mint_transfer_from_zero_address(self):
+        db, tx_col = _mock_transfer_db()
+        self._call(_make_transfer_log(from_addr=ZERO_ADDR), db)
+        tx_col.document.return_value.set.assert_not_called()
+
+    def test_skips_burn_transfer_to_zero_address(self):
+        db, tx_col = _mock_transfer_db()
+        self._call(_make_transfer_log(to_addr=ZERO_ADDR), db)
+        tx_col.document.return_value.set.assert_not_called()
+
+    def test_skips_when_already_idempotent(self):
+        db, tx_col = _mock_transfer_db(existing_tx=True)
+        self._call(_make_transfer_log(), db)
+        tx_col.document.return_value.set.assert_not_called()
+
+    def test_skips_when_sender_not_found(self):
+        db, tx_col = _mock_transfer_db(missing="sender")
+        self._call(_make_transfer_log(), db)
+        tx_col.document.return_value.set.assert_not_called()
+
+    def test_skips_when_recipient_not_found(self):
+        db, tx_col = _mock_transfer_db(missing="recipient")
+        self._call(_make_transfer_log(), db)
+        tx_col.document.return_value.set.assert_not_called()
+
+    def test_dispatched_from_process_log(self):
+        """_process_log should route TRANSFER_TOPIC events to the transfer handler."""
+        db, tx_col = _mock_transfer_db()
+        raw_log = _make_transfer_log()
+        with patch(
+            "services.event_listener.Web3.to_checksum_address",
+            side_effect=lambda x: "0x" + x.hex() if isinstance(x, (bytes, bytearray)) else x,
+        ):
+            _process_log(db, raw_log, CONTRACTS)
+        assert tx_col.document.return_value.set.call_count == 2

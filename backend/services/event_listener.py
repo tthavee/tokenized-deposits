@@ -41,6 +41,10 @@ MAX_BLOCK_RANGE = 2_000
 MINT_TOPIC: str = Web3.keccak(text="Mint(address,uint256)").hex()
 # Burn(address indexed source, uint256 amount)
 BURN_TOPIC: str = Web3.keccak(text="Burn(address,uint256)").hex()
+# ERC-20 Transfer(address indexed from, address indexed to, uint256 value)
+TRANSFER_TOPIC: str = Web3.keccak(text="Transfer(address,address,uint256)").hex()
+
+_ZERO_ADDRESS = "0x" + "0" * 40
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +132,7 @@ def _poll_network(
             "fromBlock": from_block,
             "toBlock": to_block,
             "address": addresses,
-            "topics": [[MINT_TOPIC, BURN_TOPIC]],
+            "topics": [[MINT_TOPIC, BURN_TOPIC, TRANSFER_TOPIC]],
         }
     )
     latest_block = to_block  # advance cursor only to what we fetched
@@ -156,13 +160,26 @@ def _process_log(
     log: dict,
     contracts: dict[str, Any],
 ) -> None:
-    """Upsert a Firestore transaction record for one on-chain event."""
+    """Dispatch a log entry to the appropriate handler."""
     contract_addr = log["address"].lower()
     entry = contracts.get(contract_addr)
     if not entry:
         return
 
     topic0: str = log["topics"][0].hex()
+    if topic0 == TRANSFER_TOPIC:
+        _process_transfer_log(db, log, entry)
+    elif topic0 in (MINT_TOPIC, BURN_TOPIC):
+        _process_mint_burn_log(db, log, entry, topic0)
+
+
+def _process_mint_burn_log(
+    db: firestore.Client,
+    log: dict,
+    entry: dict[str, Any],
+    topic0: str,
+) -> None:
+    """Upsert a deposit or withdrawal record for a Mint/Burn event."""
     is_mint = topic0 == MINT_TOPIC
     event_type = "deposit" if is_mint else "withdrawal"
 
@@ -200,6 +217,80 @@ def _process_log(
     }
 
     _write_with_retry(db, tx_hash, record)
+
+
+def _process_transfer_log(
+    db: firestore.Client,
+    raw_log: dict,
+    entry: dict[str, Any],
+) -> None:
+    """Write sender + recipient records for an ERC-20 Transfer event.
+
+    Skips mint (from == 0x0) and burn (to == 0x0) transfers — those are
+    handled by the Mint/Burn event handlers above.
+    """
+    import uuid
+
+    from_address = Web3.to_checksum_address(raw_log["topics"][1][-20:])
+    to_address = Web3.to_checksum_address(raw_log["topics"][2][-20:])
+
+    # Filter out mint and burn transfers.
+    if from_address.lower() == _ZERO_ADDRESS or to_address.lower() == _ZERO_ADDRESS:
+        return
+
+    amount = int.from_bytes(raw_log["data"], "big")
+    tx_hash: str = raw_log["transactionHash"].hex()
+
+    # Idempotency check: skip if records for this tx_hash already exist.
+    existing = (
+        db.collection("transactions")
+        .where("on_chain_tx_hash", "==", tx_hash)
+        .limit(1)
+        .get()
+    )
+    if existing:
+        return
+
+    network = entry["network"]
+    sender_id = _find_client_id(db, network, from_address)
+    recipient_id = _find_client_id(db, network, to_address)
+
+    if not sender_id:
+        log.warning("Transfer tx=%s: sender %s not found in clients — skipping", tx_hash, from_address)
+        return
+    if not recipient_id:
+        log.warning("Transfer tx=%s: recipient %s not found in clients — skipping", tx_hash, to_address)
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    base = {
+        "type": "transfer",
+        "amount": amount,
+        "asset_type": entry["asset_type"],
+        "network": network,
+        "status": "confirmed",
+        "on_chain_tx_hash": tx_hash,
+        "contract_address": entry.get("contract_address"),
+        "created_at": now,
+    }
+
+    sender_doc_id = str(uuid.uuid4())
+    recipient_doc_id = str(uuid.uuid4())
+
+    _write_with_retry(db, sender_doc_id, {
+        **base,
+        "id": sender_doc_id,
+        "client_id": sender_id,
+        "direction": "sent",
+        "counterparty_id": recipient_id,
+    })
+    _write_with_retry(db, recipient_doc_id, {
+        **base,
+        "id": recipient_doc_id,
+        "client_id": recipient_id,
+        "direction": "received",
+        "counterparty_id": sender_id,
+    })
 
 
 # ---------------------------------------------------------------------------
