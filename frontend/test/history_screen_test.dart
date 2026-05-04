@@ -45,6 +45,48 @@ class _EmptyTxApiClient extends ApiClient {
   Future<List<dynamic>> getTransactions(String clientId) async => [];
 }
 
+class _TransferTxApiClient extends ApiClient {
+  _TransferTxApiClient() : super();
+
+  @override
+  Future<List<dynamic>> getTransactions(String clientId) async => [
+        {
+          'id': 'tx-1',
+          'type': 'deposit',
+          'amount': 500,
+          'asset_type': 'USD',
+          'network': 'hardhat',
+          'status': 'confirmed',
+          'on_chain_tx_hash': '0xabc',
+          'created_at': '2024-01-15T10:00:00Z',
+        },
+        {
+          'id': 'tx-sent',
+          'type': 'transfer',
+          'direction': 'sent',
+          'amount': 200,
+          'asset_type': 'USD',
+          'network': 'hardhat',
+          'status': 'confirmed',
+          'counterparty_id': 'recipient-999',
+          'on_chain_tx_hash': '0xdef',
+          'created_at': '2024-01-14T09:00:00Z',
+        },
+        {
+          'id': 'tx-recv',
+          'type': 'transfer',
+          'direction': 'received',
+          'amount': 75,
+          'asset_type': 'USD',
+          'network': 'hardhat',
+          'status': 'confirmed',
+          'counterparty_id': 'sender-111',
+          'on_chain_tx_hash': '0xfed',
+          'created_at': '2024-01-13T07:00:00Z',
+        },
+      ];
+}
+
 class _FailTxApiClient extends ApiClient {
   _FailTxApiClient() : super();
 
@@ -147,6 +189,42 @@ void main() {
     testWidgets('shows error message on API failure', (tester) async {
       await _openScreen(tester, 'client-1', _FailTxApiClient());
       expect(find.textContaining('Failed to load transactions'), findsOneWidget);
+    });
+  });
+
+  group('HistoryScreen — transfer rows', () {
+    testWidgets('renders transfer tiles alongside deposit tiles', (tester) async {
+      await _openScreen(tester, 'client-1', _TransferTxApiClient());
+      expect(find.byKey(const Key('tx_tx-1')), findsOneWidget);
+      expect(find.byKey(const Key('tx_tx-sent')), findsOneWidget);
+      expect(find.byKey(const Key('tx_tx-recv')), findsOneWidget);
+    });
+
+    testWidgets('sent transfer shows direction and asset label', (tester) async {
+      await _openScreen(tester, 'client-1', _TransferTxApiClient());
+      expect(find.text('Transfer — Sent — USD (hardhat)'), findsOneWidget);
+    });
+
+    testWidgets('received transfer shows direction and asset label', (tester) async {
+      await _openScreen(tester, 'client-1', _TransferTxApiClient());
+      expect(find.text('Transfer — Received — USD (hardhat)'), findsOneWidget);
+    });
+
+    testWidgets('transfer row shows counterparty ID', (tester) async {
+      await _openScreen(tester, 'client-1', _TransferTxApiClient());
+      expect(find.byKey(const Key('counterparty_tx-sent')), findsOneWidget);
+      expect(find.text('recipient-999'), findsOneWidget);
+    });
+
+    testWidgets('transfer row shows amount and status', (tester) async {
+      await _openScreen(tester, 'client-1', _TransferTxApiClient());
+      expect(find.byKey(const Key('amount_tx-sent')), findsOneWidget);
+      expect(find.byKey(const Key('status_tx-sent')), findsOneWidget);
+    });
+
+    testWidgets('existing deposit row is unaffected', (tester) async {
+      await _openScreen(tester, 'client-1', _TransferTxApiClient());
+      expect(find.text('Deposit — USD (hardhat)'), findsOneWidget);
     });
   });
 }

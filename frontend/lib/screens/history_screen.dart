@@ -62,6 +62,54 @@ class _TxTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (tx.type == 'transfer') {
+      return _buildTransferTile(context);
+    }
+    return _buildDepositWithdrawTile(context);
+  }
+
+  Widget _buildTransferTile(BuildContext context) {
+    final isSent = tx.direction == 'sent';
+    final directionLabel = isSent ? 'Sent' : 'Received';
+    return ListTile(
+      key: Key('tx_${tx.id}'),
+      leading: Icon(
+        isSent ? Icons.arrow_forward : Icons.arrow_back,
+        color: isSent ? Colors.orange : Colors.indigo,
+      ),
+      title: Text('Transfer — $directionLabel — ${tx.assetType} (${tx.network})'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(tx.createdAt.length > 10 ? tx.createdAt.substring(0, 10) : tx.createdAt),
+          if (tx.counterpartyId != null)
+            Text(
+              tx.counterpartyId!,
+              key: Key('counterparty_${tx.id}'),
+              style: const TextStyle(fontSize: 11),
+            ),
+        ],
+      ),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            '${tx.amount}',
+            key: Key('amount_${tx.id}'),
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          Text(
+            tx.status,
+            key: Key('status_${tx.id}'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDepositWithdrawTile(BuildContext context) {
     final isDeposit = tx.type == 'deposit';
     return ListTile(
       key: Key('tx_${tx.id}'),
