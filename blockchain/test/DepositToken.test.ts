@@ -220,6 +220,47 @@ describe("DepositToken — unit tests", () => {
     });
   });
 
+  // ── KYC-enforced transfers (_update) ─────────────────────────────────────
+  describe("KYC-enforced transfers", () => {
+    const AMOUNT = ethers.parseUnits("100", 18);
+
+    beforeEach(async () => {
+      await usd.registerWallet(user.address);
+      await usd.mint(user.address, AMOUNT);
+    });
+
+    it("transfer to approved recipient succeeds and emits Transfer", async () => {
+      await usd.registerWallet(other.address);
+      await expect(usd.connect(user).transfer(other.address, AMOUNT))
+        .to.emit(usd, "Transfer")
+        .withArgs(user.address, other.address, AMOUNT);
+    });
+
+    it("transfer to unapproved recipient reverts", async () => {
+      await expect(
+        usd.connect(user).transfer(other.address, AMOUNT)
+      ).to.be.revertedWith("Recipient not KYC-approved");
+    });
+
+    it("transfer to revoked recipient reverts", async () => {
+      await usd.registerWallet(other.address);
+      await usd.revokeWallet(other.address);
+      await expect(
+        usd.connect(user).transfer(other.address, AMOUNT)
+      ).to.be.revertedWith("Recipient not KYC-approved");
+    });
+
+    it("burn (to address(0)) is unaffected by KYC check", async () => {
+      expect(await usd.isApproved(ethers.ZeroAddress)).to.be.false;
+      await expect(usd.burn(user.address, AMOUNT)).not.to.be.reverted;
+    });
+
+    it("mint to approved address is unaffected by KYC check", async () => {
+      await expect(usd.mint(user.address, AMOUNT)).not.to.be.reverted;
+      expect(await usd.balanceOf(user.address)).to.equal(AMOUNT * 2n);
+    });
+  });
+
   // ── Independence of contracts ─────────────────────────────────────────────
   describe("contract independence", () => {
     it("USD and EUR contracts have independent state", async () => {
