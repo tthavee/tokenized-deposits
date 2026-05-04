@@ -79,10 +79,10 @@ async function main(): Promise<void> {
   const db = initFirestore();
   if (db) {
     const docId = `${assetType}_${networkLabel}`;
-    await db.collection("token_registry").doc(docId).update({
+    await db.collection("token_registry").doc(docId).set({
       implementation_address: newImpl,
       upgraded_at: upgradedAt,
-    });
+    }, { merge: true });
     console.log(`Firestore token_registry/${docId} updated`);
   }
 }
