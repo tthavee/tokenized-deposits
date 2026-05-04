@@ -94,4 +94,11 @@ contract DepositToken is
         _burn(from, amount);
         emit Burn(from, amount);
     }
+
+    /// @dev Blocks transfers to addresses not in the KYC allowlist.
+    ///      Burns (to == address(0)) and mints (from == address(0)) are unaffected.
+    function _update(address from, address to, uint256 value) internal override {
+        require(to == address(0) || _approved[to], "Recipient not KYC-approved");
+        super._update(from, to, value);
+    }
 }
