@@ -6,6 +6,7 @@ import 'screens/admin_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/deposit_withdraw_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/transfer_screen.dart';
 import 'screens/kyc_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/wallet_screen.dart';
@@ -60,6 +61,7 @@ class TokenizedDepositsApp extends StatelessWidget {
         '/kyc': (_) => const KycScreen(),
         '/wallet': (_) => const WalletScreen(),
         '/deposit-withdraw': (_) => const DepositWithdrawScreen(),
+        '/transfer': (_) => const TransferScreen(),
         '/history': (_) => const HistoryScreen(),
         '/admin': (_) => const AdminScreen(),
       },
@@ -124,6 +126,11 @@ class HomeScreen extends ConsumerWidget {
             icon: Icons.swap_horiz,
             label: 'Deposit / Withdraw',
             route: '/deposit-withdraw',
+          ),
+          const _NavTile(
+            icon: Icons.send,
+            label: 'Transfer',
+            route: '/transfer',
           ),
           const _NavTile(
             icon: Icons.history,

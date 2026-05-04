@@ -77,6 +77,21 @@ class ApiClient {
         'network': network,
       })) as Map<String, dynamic>;
 
+  Future<Map<String, dynamic>> transfer({
+    required String senderId,
+    required String recipientId,
+    required int amount,
+    required String assetType,
+    required String network,
+  }) async =>
+      (await _post('/transfer', {
+        'sender_id': senderId,
+        'recipient_id': recipientId,
+        'amount': amount,
+        'asset_type': assetType,
+        'network': network,
+      })) as Map<String, dynamic>;
+
   // -------------------------------------------------------------------------
   // Balance
   // -------------------------------------------------------------------------

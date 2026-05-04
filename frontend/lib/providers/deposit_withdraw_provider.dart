@@ -96,6 +96,30 @@ class TxNotifier extends StateNotifier<TxState> {
     }
   }
 
+  Future<void> transfer({
+    required String senderId,
+    required String recipientId,
+    required int amount,
+    required String assetType,
+    required String network,
+  }) async {
+    state = const TxLoading();
+    try {
+      final result = await _api.transfer(
+        senderId: senderId,
+        recipientId: recipientId,
+        amount: amount,
+        assetType: assetType,
+        network: network,
+      );
+      state = TxSuccess(result['sender_transaction_id'] as String);
+    } on ApiException catch (e) {
+      state = TxError(e.detail);
+    } catch (e) {
+      state = TxError(e.toString());
+    }
+  }
+
   void reset() => state = const TxIdle();
 }
 
