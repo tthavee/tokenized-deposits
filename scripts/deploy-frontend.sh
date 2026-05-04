@@ -2,7 +2,7 @@
 # Build the Flutter web app and deploy it to Firebase Hosting.
 #
 # Usage:
-#   ./scripts/deploy-frontend.sh                        # build + deploy (Sepolia URL auto-detected)
+#   ./scripts/deploy-frontend.sh                        # build + deploy (uses /api proxy)
 #   ./scripts/deploy-frontend.sh --api-url <url>        # override the backend URL
 #   ./scripts/deploy-frontend.sh --build-only           # build without deploying
 #   ./scripts/deploy-frontend.sh --deploy-only          # deploy without rebuilding
@@ -31,15 +31,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------------------------------------------------------------------------
-# Resolve backend URL (from Cloud Run if not overridden)
+# Build with /api as the base URL (proxied by Firebase Hosting)
 # ---------------------------------------------------------------------------
 if $BUILD; then
   if [[ -z "$API_URL" ]]; then
-    echo "==> Fetching backend URL from Cloud Run..."
-    API_URL="$(gcloud run services describe "$SERVICE" \
-      --project "$PROJECT" \
-      --region "$REGION" \
-      --format 'value(status.url)')"
+    # Use /api which is proxied to the backend by Firebase Hosting
+    API_URL="/api"
+    echo "==> Using /api (proxied by Firebase Hosting to Cloud Run backend)"
   fi
 
   echo "==> Building Flutter web with BASE_API_URL=$API_URL"

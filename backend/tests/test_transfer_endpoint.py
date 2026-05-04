@@ -77,7 +77,7 @@ def client(mock_db) -> TestClient:
             yield c
 
 
-def _mock_w3(balance_wei: int = 100 * 10**18, tx_hash: bytes = bytes.fromhex(TX_HASH[2:])):
+def _mock_w3(balance_wei: int = 100 * 10**18, tx_hash: bytes = bytes.fromhex(TX_HASH[2:]), paused: bool = False):
     """Return a pre-wired Web3 mock."""
     w3 = MagicMock()
     w3.eth.get_transaction_count.return_value = 0
@@ -91,6 +91,8 @@ def _mock_w3(balance_wei: int = 100 * 10**18, tx_hash: bytes = bytes.fromhex(TX_
 
     contract = MagicMock()
     contract.functions.balanceOf.return_value.call.return_value = balance_wei
+    contract.functions.paused.return_value.call.return_value = paused
+    contract.functions.operatorTransfer.return_value.build_transaction.return_value = {}
     w3.eth.contract.return_value = contract
     return w3
 
@@ -125,13 +127,13 @@ class TestTransferContractNotFound:
     def test_unknown_asset_type(self, client, mock_db):
         _setup_db(mock_db)
         body = {**VALID_BODY, "asset_type": "EUR"}
-        resp = client.post("/transfer", json=body)
+        resp = client.post("/api/transfer", json=body)
         assert resp.status_code == 400
 
     def test_unknown_network(self, client, mock_db):
         _setup_db(mock_db)
         body = {**VALID_BODY, "network": "mainnet"}
-        resp = client.post("/transfer", json=body)
+        resp = client.post("/api/transfer", json=body)
         assert resp.status_code == 400
 
 
@@ -144,14 +146,14 @@ class TestTransferSenderInvalid:
         mock_db.collection("clients").document.side_effect = lambda doc_id: MagicMock(
             get=MagicMock(return_value=_doc(exists=False))
         )
-        resp = client.post("/transfer", json=VALID_BODY)
+        resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.status_code == 400
         assert "Sender" in resp.json()["detail"]
 
     def test_sender_has_no_wallet_on_network(self, client, mock_db):
         sender_no_wallet = {**SENDER_CLIENT, "wallet": {"sepolia": "0x" + "D" * 40}}
         _setup_db(mock_db, sender=sender_no_wallet)
-        resp = client.post("/transfer", json=VALID_BODY)
+        resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.status_code == 400
 
 
@@ -169,7 +171,7 @@ class TestTransferRecipientInvalid:
         mock_db.collection("clients").document.side_effect = lambda doc_id: MagicMock(
             get=MagicMock(return_value=_get(doc_id))
         )
-        resp = client.post("/transfer", json=VALID_BODY)
+        resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.status_code == 400
         assert "Recipient" in resp.json()["detail"]
 
@@ -183,7 +185,7 @@ class TestTransferRecipientInvalid:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post("/transfer", json=VALID_BODY)
+            resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.status_code == 400
 
 
@@ -201,7 +203,7 @@ class TestTransferInsufficientBalance:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post("/transfer", json=VALID_BODY)
+            resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.status_code == 400
         assert resp.json()["detail"]["message"] == "Insufficient sender balance"
 
@@ -214,7 +216,7 @@ class TestTransferInsufficientBalance:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post("/transfer", json=VALID_BODY)
+            resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.json()["detail"]["balance"] == 10
 
 
@@ -235,7 +237,7 @@ class TestTransferSuccess:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            return client.post("/transfer", json=VALID_BODY)
+            return client.post("/api/transfer", json=VALID_BODY)
 
     def test_returns_202(self, client):
         assert self._post(client).status_code == 202
@@ -252,7 +254,7 @@ class TestTransferSuccess:
         assert "recipient_transaction_id" in data
         assert data["sender_transaction_id"] != data["recipient_transaction_id"]
 
-    def test_calls_transfer_on_contract(self, client, mock_db):
+    def test_calls_operatorTransfer_on_contract(self, client, mock_db):
         w3 = _mock_w3(balance_wei=100 * 10**18, tx_hash=bytes.fromhex(TX_HASH[2:]))
         with (
             patch("routers.transfer.Web3", return_value=w3) as MockWeb3,
@@ -260,8 +262,8 @@ class TestTransferSuccess:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            client.post("/transfer", json=VALID_BODY)
-        w3.eth.contract.return_value.functions.transfer.assert_called_once()
+            client.post("/api/transfer", json=VALID_BODY)
+        w3.eth.contract.return_value.functions.operatorTransfer.assert_called_once()
 
     def test_creates_two_firestore_records(self, client, mock_db):
         self._post(client)
@@ -308,7 +310,7 @@ class TestTransferFirestoreRetry:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post("/transfer", json=VALID_BODY)
+            resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.status_code == 202
 
 
@@ -327,7 +329,7 @@ class TestTransferOnChainFailure:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post("/transfer", json=VALID_BODY)
+            resp = client.post("/api/transfer", json=VALID_BODY)
         assert resp.status_code == 502
 
     def test_marks_both_records_failed_on_exception(self, client, mock_db):
@@ -340,7 +342,7 @@ class TestTransferOnChainFailure:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            client.post("/transfer", json=VALID_BODY)
+            client.post("/api/transfer", json=VALID_BODY)
         update_calls = mock_db._transactions_col.document.return_value.update.call_args_list
         assert len(update_calls) == 2
         for call in update_calls:

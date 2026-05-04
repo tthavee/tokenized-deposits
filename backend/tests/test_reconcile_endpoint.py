@@ -96,7 +96,7 @@ def _get(client, *, api_key=VALID_KEY, w3=None, env_key=VALID_KEY):
     ):
         MockWeb3.HTTPProvider = MagicMock()
         MockWeb3.to_checksum_address = lambda x: x
-        return client.get("/admin/reconcile", headers=headers)
+        return client.get("/api/admin/reconcile", headers=headers)
 
 
 def _setup_clients(mock_db, clients_list):
@@ -232,7 +232,7 @@ class TestReconcileDiscrepancies:
             MockWeb3.to_checksum_address = lambda x: x
             # Update app state directly so the live app uses the two-entry registry
             client.app.state.token_registry = registry_two
-            resp = client.get("/admin/reconcile", headers={"X-API-Key": VALID_KEY})
+            resp = client.get("/api/admin/reconcile", headers={"X-API-Key": VALID_KEY})
 
         assert resp.status_code == 200
         assert len(resp.json()) == 1

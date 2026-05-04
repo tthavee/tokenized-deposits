@@ -91,7 +91,7 @@ def _mock_w3(paused: bool = False, tx_hash: bytes = bytes.fromhex(TX_HASH[2:])):
 class TestDepositClientNotFound:
     def test_returns_404(self, client, mock_db):
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(exists=False)
-        resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
         assert resp.status_code == 404
 
 
@@ -105,7 +105,7 @@ class TestDepositNoWallet:
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(
             exists=True, data=client_no_wallet
         )
-        resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
         assert resp.status_code == 404
 
     def test_returns_404_when_network_not_in_wallet(self, client, mock_db):
@@ -113,7 +113,7 @@ class TestDepositNoWallet:
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(
             exists=True, data=client_partial
         )
-        resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
         assert resp.status_code == 404
 
 
@@ -127,7 +127,7 @@ class TestDepositContractNotFound:
             exists=True, data=APPROVED_CLIENT
         )
         body = {**VALID_BODY, "asset_type": "EUR"}
-        resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=body)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=body)
         assert resp.status_code == 404
 
     def test_returns_404_for_unknown_network(self, client, mock_db):
@@ -135,7 +135,7 @@ class TestDepositContractNotFound:
             exists=True, data=APPROVED_CLIENT
         )
         body = {**VALID_BODY, "network": "mainnet"}
-        resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=body)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=body)
         assert resp.status_code == 404
 
 
@@ -155,7 +155,7 @@ class TestDepositContractPaused:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+            resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
         assert resp.status_code == 503
 
     def test_503_detail_contains_asset_and_network(self, client, mock_db):
@@ -169,7 +169,7 @@ class TestDepositContractPaused:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+            resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
         assert "USD" in resp.json()["detail"]
         assert "hardhat" in resp.json()["detail"]
 
@@ -193,7 +193,7 @@ class TestDepositSuccess:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            return client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+            return client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
 
     def test_returns_200(self, client):
         assert self._post(client).status_code == 200
@@ -230,7 +230,7 @@ class TestDepositSuccess:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+            client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
         w3.eth.contract.return_value.functions.mint.assert_called_once()
 
 
@@ -252,7 +252,7 @@ class TestDepositOnChainFailure:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+            resp = client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
 
         assert resp.status_code == 502
 
@@ -269,7 +269,7 @@ class TestDepositOnChainFailure:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            client.post(f"/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
+            client.post(f"/api/clients/{CLIENT_ID}/deposit", json=VALID_BODY)
 
         update_call = mock_db.collection("transactions").document().update.call_args[0][0]
         assert update_call["status"] == "failed"

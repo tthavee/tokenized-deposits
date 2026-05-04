@@ -80,17 +80,17 @@ def _post(client, url, body=None, *, api_key=VALID_KEY, env_key=VALID_KEY):
 # ---------------------------------------------------------------------------
 
 class TestAdminAuth:
-    @pytest.mark.parametrize("url", ["/admin/pause", "/admin/unpause"])
+    @pytest.mark.parametrize("url", ["/api/admin/pause", "/api/admin/unpause"])
     def test_401_missing_api_key(self, client, url):
         resp = _post(client, url, api_key=None)
         assert resp.status_code == 401
 
-    @pytest.mark.parametrize("url", ["/admin/pause", "/admin/unpause"])
+    @pytest.mark.parametrize("url", ["/api/admin/pause", "/api/admin/unpause"])
     def test_401_wrong_api_key(self, client, url):
         resp = _post(client, url, api_key="wrongkey")
         assert resp.status_code == 401
 
-    @pytest.mark.parametrize("url", ["/admin/pause", "/admin/unpause"])
+    @pytest.mark.parametrize("url", ["/api/admin/pause", "/api/admin/unpause"])
     def test_200_correct_api_key(self, client, url):
         resp = _post(client, url)
         assert resp.status_code == 200
@@ -102,20 +102,20 @@ class TestAdminAuth:
 
 class TestPause:
     def test_returns_paused_true(self, client):
-        resp = _post(client, "/admin/pause")
+        resp = _post(client, "/api/admin/pause")
         assert resp.json()["paused"] is True
 
     def test_response_has_asset_and_network(self, client):
-        resp = _post(client, "/admin/pause")
+        resp = _post(client, "/api/admin/pause")
         assert resp.json()["asset_type"] == "USD"
         assert resp.json()["network"] == "hardhat"
 
     def test_response_has_tx_hash(self, client):
-        resp = _post(client, "/admin/pause")
+        resp = _post(client, "/api/admin/pause")
         assert resp.json()["tx_hash"] is not None
 
     def test_404_unknown_pair(self, client):
-        resp = _post(client, "/admin/pause", body={"asset_type": "EUR", "network": "hardhat"})
+        resp = _post(client, "/api/admin/pause", body={"asset_type": "EUR", "network": "hardhat"})
         assert resp.status_code == 404
 
     def test_calls_pause_on_contract(self, client):
@@ -130,7 +130,7 @@ class TestPause:
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
             client.post(
-                "/admin/pause",
+                "/api/admin/pause",
                 json=VALID_BODY,
                 headers={"X-API-Key": VALID_KEY},
             )
@@ -143,20 +143,20 @@ class TestPause:
 
 class TestUnpause:
     def test_returns_paused_false(self, client):
-        resp = _post(client, "/admin/unpause")
+        resp = _post(client, "/api/admin/unpause")
         assert resp.json()["paused"] is False
 
     def test_response_has_asset_and_network(self, client):
-        resp = _post(client, "/admin/unpause")
+        resp = _post(client, "/api/admin/unpause")
         assert resp.json()["asset_type"] == "USD"
         assert resp.json()["network"] == "hardhat"
 
     def test_response_has_tx_hash(self, client):
-        resp = _post(client, "/admin/unpause")
+        resp = _post(client, "/api/admin/unpause")
         assert resp.json()["tx_hash"] is not None
 
     def test_404_unknown_pair(self, client):
-        resp = _post(client, "/admin/unpause", body={"asset_type": "USD", "network": "mainnet"})
+        resp = _post(client, "/api/admin/unpause", body={"asset_type": "USD", "network": "mainnet"})
         assert resp.status_code == 404
 
     def test_calls_unpause_on_contract(self, client):
@@ -171,7 +171,7 @@ class TestUnpause:
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
             client.post(
-                "/admin/unpause",
+                "/api/admin/unpause",
                 json=VALID_BODY,
                 headers={"X-API-Key": VALID_KEY},
             )
@@ -185,6 +185,6 @@ class TestUnpause:
 class TestPauseIsolation:
     def test_pause_one_does_not_affect_other_pair(self, client):
         # Pause USD/hardhat — USD/sepolia (not in registry) should 404 independently
-        _post(client, "/admin/pause")
-        resp = _post(client, "/admin/pause", body={"asset_type": "USD", "network": "sepolia"})
+        _post(client, "/api/admin/pause")
+        resp = _post(client, "/api/admin/pause", body={"asset_type": "USD", "network": "sepolia"})
         assert resp.status_code == 404

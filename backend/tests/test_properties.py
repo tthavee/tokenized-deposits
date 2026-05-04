@@ -234,14 +234,14 @@ def test_p6_unknown_asset_network_returns_404(asset_type, network, amount, mock_
         patch("main.run_event_listener", new=AsyncMock()),
     ):
         with TestClient(main.app) as c:
-            deposit_resp = c.post(f"/clients/{client_id}/deposit", json={
+            deposit_resp = c.post(f"/api/clients/{client_id}/deposit", json={
                 "amount": amount, "asset_type": asset_type, "network": network,
             })
-            withdraw_resp = c.post(f"/clients/{client_id}/withdraw", json={
+            withdraw_resp = c.post(f"/api/clients/{client_id}/withdraw", json={
                 "amount": amount, "asset_type": asset_type, "network": network,
             })
             balance_resp = c.get(
-                f"/clients/{client_id}/balance",
+                f"/api/clients/{client_id}/balance",
                 params={"asset_type": asset_type, "network": network},
             )
 
@@ -288,7 +288,7 @@ def test_p10_withdrawal_exceeding_balance_returns_422(balance, amount, mock_db):
         MockWeb3.HTTPProvider = MagicMock()
         MockWeb3.to_checksum_address = lambda x: x
         with TestClient(main.app) as c:
-            resp = c.post(f"/clients/{client_id}/withdraw", json={
+            resp = c.post(f"/api/clients/{client_id}/withdraw", json={
                 "amount": amount, "asset_type": asset_type, "network": network,
             })
 
@@ -334,7 +334,7 @@ def test_p16_balances_returns_one_entry_per_registry_pair(pairs, mock_db):
         MockWeb3.HTTPProvider = MagicMock()
         MockWeb3.to_checksum_address = lambda x: x
         with TestClient(main.app) as c:
-            resp = c.get(f"/clients/{client_id}/balances")
+            resp = c.get(f"/api/clients/{client_id}/balances")
 
     assert resp.status_code == 200
     assert len(resp.json()) == len(pairs)
@@ -384,7 +384,7 @@ def test_p17_history_matches_firestore_records(n_tx, asset_type, network, mock_d
         patch("main.run_event_listener", new=AsyncMock()),
     ):
         with TestClient(main.app) as c:
-            resp = c.get(f"/clients/{client_id}/transactions")
+            resp = c.get(f"/api/clients/{client_id}/transactions")
 
     assert resp.status_code == 200
     body = resp.json()

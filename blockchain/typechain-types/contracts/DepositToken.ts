@@ -38,6 +38,7 @@ export interface DepositTokenInterface extends Interface {
       | "mint"
       | "name"
       | "networkLabel"
+      | "operatorTransfer"
       | "owner"
       | "pause"
       | "paused"
@@ -108,6 +109,10 @@ export interface DepositTokenInterface extends Interface {
     functionFragment: "networkLabel",
     values?: undefined
   ): string;
+  encodeFunctionData(
+    functionFragment: "operatorTransfer",
+    values: [AddressLike, AddressLike, BigNumberish]
+  ): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(functionFragment: "pause", values?: undefined): string;
   encodeFunctionData(functionFragment: "paused", values?: undefined): string;
@@ -166,6 +171,10 @@ export interface DepositTokenInterface extends Interface {
   decodeFunctionResult(functionFragment: "name", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "networkLabel",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "operatorTransfer",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
@@ -442,6 +451,12 @@ export interface DepositToken extends BaseContract {
 
   networkLabel: TypedContractMethod<[], [string], "view">;
 
+  operatorTransfer: TypedContractMethod<
+    [from: AddressLike, to: AddressLike, amount: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
   owner: TypedContractMethod<[], [string], "view">;
 
   pause: TypedContractMethod<[], [void], "nonpayable">;
@@ -554,6 +569,13 @@ export interface DepositToken extends BaseContract {
   getFunction(
     nameOrSignature: "networkLabel"
   ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "operatorTransfer"
+  ): TypedContractMethod<
+    [from: AddressLike, to: AddressLike, amount: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "owner"
   ): TypedContractMethod<[], [string], "view">;

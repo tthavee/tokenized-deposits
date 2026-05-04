@@ -98,7 +98,7 @@ def _patched_post(client, mock_db, body=None, *, paused=False, balance=1000):
     ):
         MockWeb3.HTTPProvider = MagicMock()
         MockWeb3.to_checksum_address = lambda x: x
-        return client.post(f"/clients/{CLIENT_ID}/withdraw", json=body or VALID_BODY), w3
+        return client.post(f"/api/clients/{CLIENT_ID}/withdraw", json=body or VALID_BODY), w3
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ def _patched_post(client, mock_db, body=None, *, paused=False, balance=1000):
 class TestWithdrawClientNotFound:
     def test_returns_404(self, client, mock_db):
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(exists=False)
-        resp = client.post(f"/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
         assert resp.status_code == 404
 
 
@@ -122,7 +122,7 @@ class TestWithdrawNoWallet:
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(
             exists=True, data=data
         )
-        resp = client.post(f"/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
         assert resp.status_code == 404
 
     def test_returns_404_when_network_absent(self, client, mock_db):
@@ -130,7 +130,7 @@ class TestWithdrawNoWallet:
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(
             exists=True, data=data
         )
-        resp = client.post(f"/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
+        resp = client.post(f"/api/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
         assert resp.status_code == 404
 
 
@@ -143,14 +143,14 @@ class TestWithdrawContractNotFound:
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(
             exists=True, data=APPROVED_CLIENT
         )
-        resp = client.post(f"/clients/{CLIENT_ID}/withdraw", json={**VALID_BODY, "asset_type": "EUR"})
+        resp = client.post(f"/api/clients/{CLIENT_ID}/withdraw", json={**VALID_BODY, "asset_type": "EUR"})
         assert resp.status_code == 404
 
     def test_returns_404_for_unknown_network(self, client, mock_db):
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(
             exists=True, data=APPROVED_CLIENT
         )
-        resp = client.post(f"/clients/{CLIENT_ID}/withdraw", json={**VALID_BODY, "network": "mainnet"})
+        resp = client.post(f"/api/clients/{CLIENT_ID}/withdraw", json={**VALID_BODY, "network": "mainnet"})
         assert resp.status_code == 404
 
 
@@ -246,7 +246,7 @@ class TestWithdrawOnChainFailure:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            resp = client.post(f"/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
+            resp = client.post(f"/api/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
 
         assert resp.status_code == 502
 
@@ -263,7 +263,7 @@ class TestWithdrawOnChainFailure:
         ):
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
-            client.post(f"/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
+            client.post(f"/api/clients/{CLIENT_ID}/withdraw", json=VALID_BODY)
 
         update = mock_db.collection("transactions").document().update.call_args[0][0]
         assert update["status"] == "failed"

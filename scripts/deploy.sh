@@ -87,11 +87,9 @@ fi
 # Frontend
 # ---------------------------------------------------------------------------
 if $RUN_FRONTEND; then
-  echo "==> [frontend] Fetching backend URL from Cloud Run..."
-  API_URL="$(service_url)"
-  echo "==> [frontend] Building Flutter web with BASE_API_URL=$API_URL"
+  echo "==> [frontend] Building Flutter web with BASE_API_URL=/api (proxied by Firebase Hosting)"
   (cd "$ROOT/frontend" && flutter build web \
-    --dart-define="BASE_API_URL=${API_URL}")
+    --dart-define="BASE_API_URL=/api")
   echo "==> [frontend] Build complete."
 
   echo "==> [frontend] Deploying to Firebase Hosting..."

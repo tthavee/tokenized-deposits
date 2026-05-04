@@ -95,6 +95,19 @@ contract DepositToken is
         emit Burn(from, amount);
     }
 
+    /// @notice Transfer tokens between two approved wallets (owner only).
+    ///         This allows the operator to facilitate transfers without requiring
+    ///         users to hold private keys or sign transactions.
+    function operatorTransfer(
+        address from,
+        address to,
+        uint256 amount
+    ) external onlyOwner whenNotPaused {
+        if (!_approved[from]) revert WalletNotApproved(from);
+        if (!_approved[to]) revert WalletNotApproved(to);
+        _transfer(from, to, amount);
+    }
+
     /// @dev Blocks transfers to addresses not in the KYC allowlist.
     ///      Burns (to == address(0)) and mints (from == address(0)) are unaffected.
     function _update(address from, address to, uint256 value) internal override {

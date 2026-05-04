@@ -23,11 +23,12 @@ router = APIRouter(tags=["transfer"])
 _TRANSFER_ABI = [
     {
         "inputs": [
+            {"internalType": "address", "name": "from", "type": "address"},
             {"internalType": "address", "name": "to", "type": "address"},
             {"internalType": "uint256", "name": "amount", "type": "uint256"},
         ],
-        "name": "transfer",
-        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+        "name": "operatorTransfer",
+        "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function",
     },
@@ -35,6 +36,13 @@ _TRANSFER_ABI = [
         "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
         "name": "balanceOf",
         "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "inputs": [],
+        "name": "paused",
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "view",
         "type": "function",
     },
@@ -144,6 +152,13 @@ def transfer_tokens(
             detail={"message": "Insufficient sender balance", "balance": balance_units},
         )
 
+    # Check if contract is paused
+    if contract.functions.paused().call():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Contract paused for {body.asset_type}/{body.network}",
+        )
+
     # Create pending Firestore records for both sides of the transfer
     sender_tx_id = str(uuid.uuid4())
     recipient_tx_id = str(uuid.uuid4())
@@ -168,10 +183,11 @@ def transfer_tokens(
             "created_at": now,
         })
 
-    # Submit on-chain transfer via operator wallet
+    # Submit on-chain transfer via operator wallet using operatorTransfer
     try:
         operator = w3.eth.account.from_key(operator_key)
-        tx = contract.functions.transfer(
+        tx = contract.functions.operatorTransfer(
+            Web3.to_checksum_address(sender_chain_address),
             Web3.to_checksum_address(recipient_chain_address),
             body.amount * 10**18,
         ).build_transaction({

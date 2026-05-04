@@ -148,7 +148,7 @@ class TestCreateWalletNotFound:
         mock_db.collection("clients").document("unknown").get.return_value = (
             _make_firestore_doc(exists=False)
         )
-        resp = client.post("/clients/unknown/wallet")
+        resp = client.post("/api/clients/unknown/wallet")
         assert resp.status_code == 404
 
 
@@ -163,7 +163,7 @@ class TestCreateWalletNotApproved:
             data={**APPROVED_CLIENT_DOC, "kyc_status": "failed"},
         )
         mock_db.collection("clients").document("client-123").get.return_value = doc
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         assert resp.status_code == 403
 
     def test_returns_403_for_pending_kyc(self, client, mock_db):
@@ -172,7 +172,7 @@ class TestCreateWalletNotApproved:
             data={**APPROVED_CLIENT_DOC, "kyc_status": "pending"},
         )
         mock_db.collection("clients").document("client-123").get.return_value = doc
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         assert resp.status_code == 403
 
 
@@ -187,28 +187,28 @@ class TestCreateWalletSuccess:
         mock_db.collection("clients").document("client-123").get.return_value = doc
 
     def test_returns_200(self, client):
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         assert resp.status_code == 200
 
     def test_response_contains_client_id(self, client):
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         assert resp.json()["client_id"] == "client-123"
 
     def test_response_contains_wallet_map(self, client):
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         wallet = resp.json()["wallet"]
         assert "hardhat" in wallet
         assert "sepolia" in wallet
 
     def test_wallet_addresses_are_valid_ethereum(self, client):
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         wallet = resp.json()["wallet"]
         for address in wallet.values():
             assert address.startswith("0x"), f"Expected 0x-prefixed address, got {address}"
             assert len(address) == 42
 
     def test_persists_wallet_to_firestore(self, client, mock_db):
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         wallet = resp.json()["wallet"]
         mock_db.collection("clients").document("client-123").update.assert_called_once_with(
             {"wallet": wallet}
@@ -219,7 +219,7 @@ class TestCreateWalletSuccess:
             patch("routers.clients.Web3") as mock_web3,
             patch.dict("os.environ", {"OPERATOR_PRIVATE_KEY": ""}),
         ):
-            client.post("/clients/client-123/wallet")
+            client.post("/api/clients/client-123/wallet")
             mock_web3.assert_not_called()
 
 
@@ -239,15 +239,15 @@ class TestCreateWalletIdempotent:
         mock_db.collection("clients").document("client-123").get.return_value = doc
 
     def test_returns_200(self, client):
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         assert resp.status_code == 200
 
     def test_returns_existing_wallet(self, client):
-        resp = client.post("/clients/client-123/wallet")
+        resp = client.post("/api/clients/client-123/wallet")
         assert resp.json()["wallet"] == self.EXISTING_WALLET
 
     def test_does_not_update_firestore(self, client, mock_db):
-        client.post("/clients/client-123/wallet")
+        client.post("/api/clients/client-123/wallet")
         mock_db.collection("clients").document("client-123").update.assert_not_called()
 
 
@@ -280,7 +280,7 @@ class TestOnChainRegistration:
             MockWeb3.HTTPProvider = MagicMock()
             MockWeb3.to_checksum_address = lambda x: x
 
-            resp = client_with_registry.post("/clients/client-123/wallet")
+            resp = client_with_registry.post("/api/clients/client-123/wallet")
 
         assert resp.status_code == 200
         mock_w3_instance.eth.send_raw_transaction.assert_called_once()

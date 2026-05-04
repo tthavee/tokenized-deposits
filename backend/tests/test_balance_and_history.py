@@ -1,8 +1,8 @@
 """
 Tests for:
-  GET /clients/{id}/balance
-  GET /clients/{id}/balances
-  GET /clients/{id}/transactions
+  GET /api/clients/{id}/balance
+  GET /api/clients/{id}/balances
+  GET /api/clients/{id}/transactions
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -96,11 +96,11 @@ def client(mock_db) -> TestClient:
 
 
 # ---------------------------------------------------------------------------
-# GET /clients/{id}/balance
+# GET /api/clients/{id}/balance
 # ---------------------------------------------------------------------------
 
 class TestGetBalance:
-    URL = f"/clients/{CLIENT_ID}/balance"
+    URL = f"/api/clients/{CLIENT_ID}/balance"
 
     def test_404_client_not_found(self, client, mock_db):
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(exists=False)
@@ -164,11 +164,11 @@ class TestGetBalance:
 
 
 # ---------------------------------------------------------------------------
-# GET /clients/{id}/balances
+# GET /api/clients/{id}/balances
 # ---------------------------------------------------------------------------
 
 class TestGetBalances:
-    URL = f"/clients/{CLIENT_ID}/balances"
+    URL = f"/api/clients/{CLIENT_ID}/balances"
 
     def test_404_client_not_found(self, client, mock_db):
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(exists=False)
@@ -229,11 +229,11 @@ class TestGetBalances:
 
 
 # ---------------------------------------------------------------------------
-# GET /clients/{id}/transactions
+# GET /api/clients/{id}/transactions
 # ---------------------------------------------------------------------------
 
 class TestGetTransactions:
-    URL = f"/clients/{CLIENT_ID}/transactions"
+    URL = f"/api/clients/{CLIENT_ID}/transactions"
 
     def test_404_client_not_found(self, client, mock_db):
         mock_db.collection("clients").document(CLIENT_ID).get.return_value = _doc(exists=False)
