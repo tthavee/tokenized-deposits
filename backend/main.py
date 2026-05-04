@@ -27,6 +27,8 @@ from firebase_admin import credentials, firestore
 
 from routers.admin import router as admin_router
 from routers.clients import router as clients_router
+from routers.transfer import router as transfer_router
+from services.event_listener import run_event_listener
 
 
 def _init_firebase() -> firestore.Client:
@@ -74,6 +76,7 @@ app.add_middleware(
 
 app.include_router(clients_router)
 app.include_router(admin_router)
+app.include_router(transfer_router)
 
 
 @app.get("/health")
