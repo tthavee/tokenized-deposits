@@ -4,6 +4,7 @@ Transfer endpoint:
   POST /transfer  — validate and submit an on-chain token transfer between two clients
 """
 
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -14,6 +15,8 @@ from pydantic import BaseModel
 from web3 import Web3
 
 from services.wallet import RPC_URLS
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["transfer"])
 
@@ -37,6 +40,8 @@ _TRANSFER_ABI = [
     },
 ]
 
+_MAX_RETRIES = 3
+
 
 def _db(request: Request):
     return request.app.state.db
@@ -44,6 +49,19 @@ def _db(request: Request):
 
 def _token_registry(request: Request) -> dict[str, Any]:
     return request.app.state.token_registry
+
+
+def _write_with_retry(db, tx_id: str, data: dict) -> None:
+    """Update a transaction document, retrying up to _MAX_RETRIES times."""
+    last_exc: Exception | None = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            db.collection("transactions").document(tx_id).update(data)
+            return
+        except Exception as exc:
+            last_exc = exc
+            log.warning("Firestore update attempt %d/%d failed for %s: %s", attempt, _MAX_RETRIES, tx_id, exc)
+    log.error("permanent Firestore failure for %s after %d attempts: %s", tx_id, _MAX_RETRIES, last_exc)
 
 
 class TransferRequest(BaseModel):
@@ -132,8 +150,8 @@ def transfer_tokens(
     now = datetime.now(timezone.utc).isoformat()
 
     for tx_id, client_id, direction, counterparty in [
-        (sender_tx_id, body.sender_id, "out", body.recipient_id),
-        (recipient_tx_id, body.recipient_id, "in", body.sender_id),
+        (sender_tx_id, body.sender_id, "sent", body.recipient_id),
+        (recipient_tx_id, body.recipient_id, "received", body.sender_id),
     ]:
         db.collection("transactions").document(tx_id).set({
             "id": tx_id,
@@ -165,12 +183,27 @@ def transfer_tokens(
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction).hex()
     except Exception as exc:
         for tx_id in [sender_tx_id, recipient_tx_id]:
-            db.collection("transactions").document(tx_id).update({"status": "failed"})
+            _write_with_retry(db, tx_id, {"status": "failed"})
         raise HTTPException(status_code=502, detail=f"On-chain transfer failed: {exc}") from exc
+
+    # Wait for receipt and update both records to confirmed
+    try:
+        w3.eth.wait_for_transaction_receipt(tx_hash, timeout=90)
+    except Exception:
+        log.warning("receipt timeout for tx=%s — records remain pending", tx_hash)
+        return TransferResponse(
+            sender_transaction_id=sender_tx_id,
+            recipient_transaction_id=recipient_tx_id,
+            status="pending",
+            on_chain_tx_hash=tx_hash,
+        )
+
+    for tx_id in [sender_tx_id, recipient_tx_id]:
+        _write_with_retry(db, tx_id, {"status": "confirmed", "on_chain_tx_hash": tx_hash})
 
     return TransferResponse(
         sender_transaction_id=sender_tx_id,
         recipient_transaction_id=recipient_tx_id,
-        status="pending",
+        status="confirmed",
         on_chain_tx_hash=tx_hash,
     )

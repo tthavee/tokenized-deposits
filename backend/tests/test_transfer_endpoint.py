@@ -240,8 +240,8 @@ class TestTransferSuccess:
     def test_returns_202(self, client):
         assert self._post(client).status_code == 202
 
-    def test_status_is_pending(self, client):
-        assert self._post(client).json()["status"] == "pending"
+    def test_status_is_confirmed(self, client):
+        assert self._post(client).json()["status"] == "confirmed"
 
     def test_response_has_tx_hash(self, client):
         assert self._post(client).json()["on_chain_tx_hash"] is not None
@@ -268,19 +268,48 @@ class TestTransferSuccess:
         set_calls = mock_db._transactions_col.document.return_value.set.call_args_list
         assert len(set_calls) == 2
 
-    def test_sender_record_has_direction_out(self, client, mock_db):
+    def test_sender_record_has_direction_sent(self, client, mock_db):
         self._post(client)
         records = [c[0][0] for c in mock_db._transactions_col.document.return_value.set.call_args_list]
-        out_records = [r for r in records if r.get("direction") == "out"]
-        assert len(out_records) == 1
-        assert out_records[0]["client_id"] == SENDER_ID
+        sent_records = [r for r in records if r.get("direction") == "sent"]
+        assert len(sent_records) == 1
+        assert sent_records[0]["client_id"] == SENDER_ID
 
-    def test_recipient_record_has_direction_in(self, client, mock_db):
+    def test_recipient_record_has_direction_received(self, client, mock_db):
         self._post(client)
         records = [c[0][0] for c in mock_db._transactions_col.document.return_value.set.call_args_list]
-        in_records = [r for r in records if r.get("direction") == "in"]
-        assert len(in_records) == 1
-        assert in_records[0]["client_id"] == RECIPIENT_ID
+        received_records = [r for r in records if r.get("direction") == "received"]
+        assert len(received_records) == 1
+        assert received_records[0]["client_id"] == RECIPIENT_ID
+
+    def test_both_records_updated_to_confirmed(self, client, mock_db):
+        self._post(client)
+        update_calls = mock_db._transactions_col.document.return_value.update.call_args_list
+        confirmed = [c[0][0] for c in update_calls if c[0][0].get("status") == "confirmed"]
+        assert len(confirmed) == 2
+        assert all("on_chain_tx_hash" in c for c in confirmed)
+
+
+# ---------------------------------------------------------------------------
+# Firestore retry on confirmed-update failure
+# ---------------------------------------------------------------------------
+
+class TestTransferFirestoreRetry:
+    def test_retries_confirmed_update_up_to_3_times(self, client, mock_db):
+        _setup_db(mock_db)
+        # First two update calls raise, third succeeds
+        mock_db._transactions_col.document.return_value.update.side_effect = [
+            Exception("transient"), Exception("transient"), None, None,
+        ]
+        w3 = _mock_w3(balance_wei=100 * 10**18, tx_hash=bytes.fromhex(TX_HASH[2:]))
+        with (
+            patch("routers.transfer.Web3", return_value=w3) as MockWeb3,
+            patch.dict("os.environ", {"OPERATOR_PRIVATE_KEY": "0x" + "a" * 64}),
+        ):
+            MockWeb3.HTTPProvider = MagicMock()
+            MockWeb3.to_checksum_address = lambda x: x
+            resp = client.post("/transfer", json=VALID_BODY)
+        assert resp.status_code == 202
 
 
 # ---------------------------------------------------------------------------
