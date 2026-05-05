@@ -170,6 +170,8 @@ class TransactionRecord(BaseModel):
     on_chain_tx_hash: Optional[str] = None
     contract_address: Optional[str] = None
     created_at: str
+    direction: Optional[str] = None
+    counterparty_id: Optional[str] = None
 
 
 class ClientSummary(BaseModel):
@@ -610,8 +612,10 @@ def get_balances(
     results: list[BalanceEntry] = []
 
     for entry in token_registry.values():
-        asset_type = entry["asset_type"]
-        network = entry["network"]
+        asset_type = entry.get("asset_type", "")
+        network = entry.get("network", "")
+        if not asset_type or not network:
+            continue
         contract_address = entry.get("contract_address", "")
         chain_address = wallet.get(network, "")
 
